@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
-import { Plus, Wrench, Calendar, CheckCircle2, AlertCircle, Search, Pencil, Trash2, Loader2, DollarSign, Phone, User, X } from "lucide-react";
+import { Plus, Wrench, Calendar, CheckCircle2, AlertCircle, Search, Pencil, Trash2, Loader2, DollarSign, Phone, User, X, Clock, AlignLeft, Tags } from "lucide-react";
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { adminNav } from "@/components/dashboard/adminNav";
 import { PageHeader, PrimaryButton } from "@/components/dashboard/PageHeader";
@@ -10,35 +10,29 @@ import {
   insertMaintenanceEntry,
   updateMaintenanceEntry,
   deleteMaintenanceEntry,
+  fetchBlocks,
   type MaintenanceRow,
+  type BlockRow,
 } from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/admin/maintenance")({
-  head: () => ({ meta: [{ title: "Maintenance — Communa Admin" }] }),
+  head: () => ({ meta: [{ title: "Maintenance Tasks — Communa Admin" }] }),
   component: MaintenancePage,
 });
 
-function getAssetCategory(name: string): string {
-  const n = name.toLowerCase();
-  if (n.includes("lift") || n.includes("elevator")) return "Elevator";
-  if (n.includes("generator") || n.includes("dg") || n.includes("power")) return "Power";
-  if (n.includes("pump") || n.includes("water") || n.includes("plumbing")) return "Plumbing";
-  if (n.includes("stp") || n.includes("sewage") || n.includes("sanitation")) return "Sanitation";
-  if (n.includes("cctv") || n.includes("camera") || n.includes("security") || n.includes("fire")) return "Security";
-  return "Utility";
-}
+const CATEGORIES = [
+  "Lift", "Generator", "Water Tank", "Plumbing", "Electrical Systems", 
+  "Fire Safety Equipment", "CCTV Systems", "Common Areas", "Garden/Landscaping", "Other Assets"
+];
 
-function getAssetHealth(status: string): number {
-  if (status === "Healthy") return 92;
-  if (status === "Due Soon") return 64;
-  return 38; // Overdue
-}
+const PRIORITIES = ["Low", "Medium", "High", "Critical"];
+const STATUSES = ["Scheduled", "In Progress", "Completed", "Cancelled"];
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+  return d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
 }
 
 function toInputDate(dateStr: string | null): string {
@@ -50,32 +44,39 @@ function toInputDate(dateStr: string | null): string {
 
 function MaintenancePage() {
   const [data, setData] = useState<MaintenanceRow[]>([]);
+  const [blocks, setBlocks] = useState<BlockRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filter, setFilter] = useState<"All" | "Healthy" | "Due Soon" | "Overdue">("All");
+  const [filter, setFilter] = useState<string>("All");
 
   // Modal State
   const [openModal, setOpenModal] = useState(false);
-  const [selectedAsset, setSelectedAsset] = useState<MaintenanceRow | null>(null);
+  const [selectedTask, setSelectedTask] = useState<MaintenanceRow | null>(null);
 
   // Form Fields
   const [assetName, setAssetName] = useState("");
+  const [category, setCategory] = useState(CATEGORIES[0]);
+  const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
-  const [lastServiceDate, setLastServiceDate] = useState("");
-  const [nextDueDate, setNextDueDate] = useState("");
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [completionDate, setCompletionDate] = useState("");
   const [cost, setCost] = useState("0");
   const [vendorName, setVendorName] = useState("");
   const [vendorContact, setVendorContact] = useState("");
-  const [status, setStatus] = useState<"Healthy" | "Due Soon" | "Overdue">("Healthy");
+  const [priority, setPriority] = useState("Medium");
+  const [status, setStatus] = useState("Scheduled");
 
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load all maintenance records from Supabase
   const loadData = async () => {
     try {
-      const allMaintenance = await fetchMaintenanceAll();
+      const [allMaintenance, allBlocks] = await Promise.all([
+        fetchMaintenanceAll(),
+        fetchBlocks(),
+      ]);
       setData(allMaintenance);
+      setBlocks(allBlocks);
     } catch (e) {
       console.error("Failed to load maintenance records:", e);
     } finally {
@@ -85,56 +86,51 @@ function MaintenancePage() {
 
   useEffect(() => {
     loadData();
-
-    // Set up real-time subscription for instant synchronization
     const channel = supabase
       .channel("maintenance-admin-sync")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "maintenance" },
-        () => {
-          loadData();
-        }
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "maintenance" }, () => loadData())
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const handleOpenNew = () => {
-    setSelectedAsset(null);
+    setSelectedTask(null);
     setAssetName("");
+    setCategory(CATEGORIES[0]);
+    setDescription("");
     setLocation("");
-    setLastServiceDate("");
-    setNextDueDate("");
+    setScheduledDate("");
+    setCompletionDate("");
     setCost("0");
     setVendorName("");
     setVendorContact("");
-    setStatus("Healthy");
+    setPriority("Medium");
+    setStatus("Scheduled");
     setErrorMsg(null);
     setOpenModal(true);
   };
 
   const handleOpenEdit = (a: MaintenanceRow) => {
-    setSelectedAsset(a);
-    setAssetName(a.asset_name);
-    setLocation(a.location);
-    setLastServiceDate(toInputDate(a.last_service_date));
-    setNextDueDate(toInputDate(a.next_due_date));
-    setCost(String(a.cost));
+    setSelectedTask(a);
+    setAssetName(a.asset_name || "");
+    setCategory(a.category || CATEGORIES[0]);
+    setDescription(a.description || "");
+    setLocation(a.location || "");
+    setScheduledDate(toInputDate(a.scheduled_date));
+    setCompletionDate(toInputDate(a.completion_date));
+    setCost(String(a.cost || 0));
     setVendorName(a.vendor_name || "");
     setVendorContact(a.vendor_contact || "");
-    setStatus(a.status as any);
+    setPriority(a.priority || "Medium");
+    setStatus(a.status || "Scheduled");
     setErrorMsg(null);
     setOpenModal(true);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!assetName.trim() || !location.trim()) {
-      setErrorMsg("Asset Name and Location are required.");
+    if (!assetName.trim() || !category) {
+      setErrorMsg("Asset Name and Category are required.");
       return;
     }
 
@@ -143,18 +139,21 @@ function MaintenancePage() {
 
     const payload = {
       asset_name: assetName.trim(),
+      category,
+      description: description.trim(),
       location: location.trim(),
-      last_service_date: lastServiceDate ? new Date(lastServiceDate).toISOString() : null,
-      next_due_date: nextDueDate ? new Date(nextDueDate).toISOString() : null,
+      scheduled_date: scheduledDate ? new Date(scheduledDate).toISOString() : null,
+      completion_date: completionDate ? new Date(completionDate).toISOString() : null,
       cost: Number(cost) || 0,
       vendor_name: vendorName.trim(),
       vendor_contact: vendorContact.trim(),
+      priority,
       status,
     };
 
     try {
-      if (selectedAsset) {
-        const { error } = await updateMaintenanceEntry(selectedAsset.id, payload);
+      if (selectedTask) {
+        const { error } = await updateMaintenanceEntry(selectedTask.id, payload);
         if (error) throw new Error(error);
       } else {
         const { error } = await insertMaintenanceEntry(payload);
@@ -163,7 +162,6 @@ function MaintenancePage() {
       setOpenModal(false);
       loadData();
     } catch (err: any) {
-      console.error(err);
       setErrorMsg(err.message || "Failed to save record.");
     } finally {
       setSaving(false);
@@ -171,36 +169,48 @@ function MaintenancePage() {
   };
 
   const handleDelete = async () => {
-    if (!selectedAsset) return;
-    if (!confirm("Are you sure you want to delete this maintenance record?")) return;
+    if (!selectedTask) return;
+    if (!confirm("Are you sure you want to delete this maintenance task?")) return;
 
     setSaving(true);
     setErrorMsg(null);
     try {
-      const { error } = await deleteMaintenanceEntry(selectedAsset.id);
+      const { error } = await deleteMaintenanceEntry(selectedTask.id);
       if (error) throw new Error(error);
       setOpenModal(false);
       loadData();
     } catch (err: any) {
-      console.error(err);
       setErrorMsg(err.message || "Failed to delete record.");
     } finally {
       setSaving(false);
     }
   };
 
-  // Compute stat counters
   const stats = useMemo(() => {
+    const now = new Date();
+    now.setHours(0,0,0,0);
+    let overdueCount = 0;
+    let totalCost = 0;
+
+    data.forEach(task => {
+      if (task.status !== "Cancelled") totalCost += Number(task.cost || 0);
+      if (task.status !== "Completed" && task.status !== "Cancelled" && task.scheduled_date) {
+        const sched = new Date(task.scheduled_date);
+        if (sched < now) overdueCount++;
+      }
+    });
+
     return {
       total: data.length,
-      healthy: data.filter((a) => a.status === "Healthy").length,
-      dueSoon: data.filter((a) => a.status === "Due Soon").length,
-      overdue: data.filter((a) => a.status === "Overdue").length,
+      scheduled: data.filter(a => a.status === "Scheduled").length,
+      inProgress: data.filter(a => a.status === "In Progress").length,
+      completed: data.filter(a => a.status === "Completed").length,
+      overdue: overdueCount,
+      cost: totalCost
     };
   }, [data]);
 
-  // Dynamic filter and search query matching
-  const filteredAssets = useMemo(() => {
+  const filteredTasks = useMemo(() => {
     return data.filter((a) => {
       const matchesFilter = filter === "All" || a.status === filter;
       if (!matchesFilter) return false;
@@ -209,400 +219,246 @@ function MaintenancePage() {
       if (!q) return true;
 
       return (
-        a.asset_name.toLowerCase().includes(q) ||
-        a.location.toLowerCase().includes(q) ||
-        (a.vendor_name && a.vendor_name.toLowerCase().includes(q)) ||
-        a.status.toLowerCase().includes(q)
+        (a.asset_name && a.asset_name.toLowerCase().includes(q)) ||
+        (a.category && a.category.toLowerCase().includes(q)) ||
+        (a.description && a.description.toLowerCase().includes(q)) ||
+        (a.location && a.location.toLowerCase().includes(q)) ||
+        (a.vendor_name && a.vendor_name.toLowerCase().includes(q))
       );
     });
   }, [data, searchQuery, filter]);
 
-  // Compute intelligent upcoming schedule lists
-  const upcomingSchedule = useMemo(() => {
-    return data
-      .filter((a) => a.next_due_date)
-      .map((a) => {
-        const nextDate = new Date(a.next_due_date!);
-        let dateLabel = "N/A";
-        if (!isNaN(nextDate.getTime())) {
-          const diffTime = nextDate.getTime() - new Date().getTime();
-          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          if (diffDays === 0) dateLabel = "Today";
-          else if (diffDays === 1) dateLabel = "Tomorrow";
-          else if (diffDays === -1) dateLabel = "Yesterday";
-          else if (diffDays > 1 && diffDays < 7) {
-            dateLabel = nextDate.toLocaleDateString("en-US", { weekday: "long" });
-          } else {
-            dateLabel = nextDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-          }
-        }
+  const getToneForStatus = (s: string) => {
+    if (s === "Completed") return "success";
+    if (s === "In Progress") return "primary";
+    if (s === "Scheduled") return "warning";
+    return "muted";
+  };
 
-        return {
-          date: dateLabel,
-          time: "10:00",
-          title: `${a.asset_name} scheduled service`,
-          vendor: a.vendor_name || "—",
-          tone: (a.status === "Overdue" ? "danger" : a.status === "Due Soon" ? "warning" : "primary") as any,
-        };
-      })
-      .slice(0, 5);
-  }, [data]);
-
-  const tone = (s: string) =>
-    s === "Healthy" ? "success" : s === "Due Soon" ? "warning" : "danger";
+  const getToneForPriority = (p: string) => {
+    if (p === "Critical") return "destructive";
+    if (p === "High") return "warning";
+    if (p === "Medium") return "primary";
+    return "muted";
+  };
 
   return (
     <DashboardLayout role="Admin" items={adminNav}>
       <div className="space-y-6 animate-fade-up">
         <PageHeader
           title="Maintenance"
-          subtitle="Track community assets and service schedules."
+          subtitle="Track community maintenance tasks, records, and expenses."
           actions={
-            <PrimaryButton onClick={handleOpenNew}>
-              <Plus className="h-4 w-4" /> Schedule Service
-            </PrimaryButton>
+            <button
+              type="button"
+              onClick={handleOpenNew}
+              className="inline-flex h-10 px-4 items-center gap-2 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-bold shadow-elegant hover:shadow-glow transition"
+            >
+              <Plus className="h-4 w-4" /> Add Task
+            </button>
           }
         />
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard
-            label="Total Assets"
-            value={loading ? "..." : String(stats.total)}
-            icon={Wrench}
-            tone="primary"
-          />
-          <StatCard
-            label="Healthy"
-            value={loading ? "..." : String(stats.healthy)}
-            icon={CheckCircle2}
-            tone="success"
-          />
-          <StatCard
-            label="Due Soon"
-            value={loading ? "..." : String(stats.dueSoon)}
-            icon={Calendar}
-            tone="warning"
-          />
-          <StatCard
-            label="Overdue"
-            value={loading ? "..." : String(stats.overdue)}
-            icon={AlertCircle}
-            tone="accent"
-          />
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <StatCard label="Total Tasks" value={loading ? "..." : String(stats.total)} icon={Wrench} tone="primary" />
+          <StatCard label="Scheduled" value={loading ? "..." : String(stats.scheduled)} icon={Calendar} tone="warning" />
+          <StatCard label="In Progress" value={loading ? "..." : String(stats.inProgress)} icon={Clock} tone="primary" />
+          <StatCard label="Completed" value={loading ? "..." : String(stats.completed)} icon={CheckCircle2} tone="success" />
+          <StatCard label="Overdue" value={loading ? "..." : String(stats.overdue)} icon={AlertCircle} tone="accent" />
+          <StatCard label="Total Cost" value={loading ? "..." : `$${stats.cost.toLocaleString()}`} icon={DollarSign} tone="success" />
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <Card title="Assets">
-              {/* Dynamic search and filter row */}
-              <div className="flex flex-col sm:flex-row gap-2 mb-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    placeholder="Search assets, location, vendor..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full h-9 pl-9 pr-4 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                  />
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {(["All", "Healthy", "Due Soon", "Overdue"] as const).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setFilter(s)}
-                      className={`px-3 h-9 text-[11px] font-semibold rounded-lg transition ${
-                        filter === s
-                          ? "bg-[image:var(--gradient-primary)] text-white shadow-elegant"
-                          : "bg-foreground/5 hover:bg-foreground/10 text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {loading ? (
-                <div className="flex justify-center items-center py-12">
-                  <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
-                </div>
-              ) : filteredAssets.length > 0 ? (
-                <div className="grid sm:grid-cols-2 gap-3">
-                  {filteredAssets.map((a) => {
-                    const health = getAssetHealth(a.status);
-                    const category = getAssetCategory(a.asset_name);
-                    return (
-                      <div
-                        key={a.id}
-                        onClick={() => handleOpenEdit(a)}
-                        className="rounded-xl glass p-4 hover:shadow-card transition cursor-pointer border border-border/50 hover:border-primary/30 flex flex-col justify-between"
-                      >
-                        <div>
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                              <div className="grid place-items-center h-10 w-10 rounded-lg bg-[image:var(--gradient-primary)] text-white">
-                                <Wrench className="h-4 w-4" />
-                              </div>
-                              <div>
-                                <div className="font-semibold text-sm leading-snug">{a.asset_name}</div>
-                                <div className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">
-                                  {category} · {a.location}
-                                </div>
-                              </div>
-                            </div>
-                            <Badge tone={tone(a.status)}>{a.status}</Badge>
-                          </div>
-                          
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between text-[11px]">
-                              <span className="text-muted-foreground">Condition Rating</span>
-                              <span className="font-semibold">{health}%</span>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-foreground/5 overflow-hidden">
-                              <div
-                                className="h-full rounded-full"
-                                style={{
-                                  width: `${health}%`,
-                                  background:
-                                    health > 75
-                                      ? "oklch(from var(--success) l c h)"
-                                      : health > 50
-                                        ? "oklch(from var(--warning) l c h)"
-                                        : "oklch(from var(--destructive) l c h)",
-                                }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between text-[11px] text-muted-foreground">
-                          <span>Last: {formatDate(a.last_service_date)}</span>
-                          <span>
-                            Next:{" "}
-                            <span className="font-semibold text-foreground/80">
-                              {formatDate(a.next_due_date)}
-                            </span>
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="p-12 text-center text-muted-foreground">
-                  <AlertCircle className="h-8 w-8 mx-auto mb-2 text-muted-foreground/60" />
-                  <p className="text-sm">No maintenance records found matching your filters.</p>
-                </div>
-              )}
-            </Card>
+        <Card title="Maintenance Records">
+          <div className="flex flex-col sm:flex-row gap-2 mb-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search by asset, category, vendor, description..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full h-9 pl-9 pr-4 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
+              />
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {(["All", ...STATUSES]).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setFilter(s)}
+                  className={`px-3 h-9 text-[11px] font-semibold rounded-lg transition ${
+                    filter === s
+                      ? "bg-[image:var(--gradient-primary)] text-white shadow-elegant"
+                      : "bg-foreground/5 hover:bg-foreground/10 text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <Card title="Upcoming Schedule">
-            {loading ? (
-              <div className="flex justify-center items-center py-6">
-                <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-primary"></div>
-              </div>
-            ) : upcomingSchedule.length > 0 ? (
-              <ol className="space-y-3">
-                {upcomingSchedule.map((s, i) => (
-                  <li
-                    key={i}
-                    className="rounded-xl bg-foreground/[0.03] p-3 hover:bg-foreground/[0.06] transition"
+          {loading ? (
+            <div className="flex justify-center items-center py-12">
+              <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
+            </div>
+          ) : filteredTasks.length > 0 ? (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {filteredTasks.map((a) => {
+                return (
+                  <div
+                    key={a.id}
+                    onClick={() => handleOpenEdit(a)}
+                    className="rounded-xl glass p-4 hover:shadow-card transition cursor-pointer border border-border/50 hover:border-primary/30 flex flex-col justify-between"
                   >
-                    <div className="flex items-center justify-between text-[11px] text-muted-foreground mb-1">
-                      <span>
-                        {s.date} · {s.time}
-                      </span>
-                      <Badge tone={s.tone}>scheduled</Badge>
+                    <div>
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="font-semibold text-sm leading-snug">{a.asset_name}</div>
+                        <Badge tone={getToneForStatus(a.status)}>{a.status}</Badge>
+                      </div>
+                      <div className="text-[10px] text-muted-foreground font-medium flex items-center gap-2 mb-3">
+                        <span className="flex items-center gap-1"><Tags className="h-3 w-3" /> {a.category}</span>
+                        {a.priority && <span className={`px-1.5 py-0.5 rounded flex items-center gap-1 font-semibold ${
+                          a.priority === 'Critical' ? 'bg-destructive/10 text-destructive' :
+                          a.priority === 'High' ? 'bg-warning/10 text-warning' :
+                          'bg-primary/10 text-primary'
+                        }`}>Priority: {a.priority}</span>}
+                      </div>
+                      {a.description && (
+                        <p className="text-xs text-muted-foreground line-clamp-2 mb-3">{a.description}</p>
+                      )}
                     </div>
-                    <div className="text-sm font-medium">{s.title}</div>
-                    <div className="text-[11px] text-muted-foreground mt-0.5">Vendor: {s.vendor}</div>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <div className="text-center py-8 text-xs text-muted-foreground">
-                No upcoming service schedules.
-              </div>
-            )}
-          </Card>
-        </div>
+
+                    <div className="mt-auto pt-3 border-t border-border/40 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground">
+                      <div>Sched: <span className="font-medium text-foreground/80">{formatDate(a.scheduled_date)}</span></div>
+                      <div>Cost: <span className="font-medium text-foreground/80">${a.cost?.toLocaleString() || 0}</span></div>
+                      {a.vendor_name && <div className="col-span-2">Vendor: <span className="font-medium text-foreground/80">{a.vendor_name}</span></div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-12 text-center text-muted-foreground">
+              <AlertCircle className="h-8 w-8 mx-auto mb-2 text-muted-foreground/60" />
+              <p className="text-sm">No maintenance records found matching your filters.</p>
+            </div>
+          )}
+        </Card>
       </div>
 
       {/* Schedule / Edit Maintenance Modal Form */}
       {openModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
-          <div className="relative w-full max-w-md rounded-2xl glass-strong border border-border/80 shadow-elegant p-6 sm:p-8 animate-scale-in">
-            <button
-              onClick={() => setOpenModal(false)}
-              className="absolute right-4 top-4 text-muted-foreground hover:text-foreground h-8 w-8 grid place-items-center rounded-lg hover:bg-foreground/5 transition"
-            >
-              <X className="h-4 w-4" />
-            </button>
+          <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-2xl glass-strong border border-border/80 shadow-elegant overflow-hidden animate-scale-in">
+            
+            {/* Modal Header */}
+            <div className="px-6 py-5 border-b border-border/40 flex items-center justify-between shrink-0 bg-background/50">
+              <h3 className="text-lg font-bold tracking-tight">
+                {selectedTask ? "Edit Maintenance Task" : "Add Maintenance Task"}
+              </h3>
+              <button
+                onClick={() => setOpenModal(false)}
+                className="text-muted-foreground hover:text-foreground h-8 w-8 grid place-items-center rounded-lg hover:bg-foreground/5 transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
-            <h3 className="text-lg font-bold mb-4 tracking-tight">
-              {selectedAsset ? "Edit Maintenance Record" : "Schedule Asset Service"}
-            </h3>
+            {/* Modal Body (Scrollable) */}
+            <form id="maintenance-form" onSubmit={handleSave} className="flex flex-col min-h-0 overflow-hidden">
+              <div className="p-6 sm:p-8 overflow-y-auto custom-scrollbar space-y-5">
+                {errorMsg && (
+                  <div className="mb-6 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2 font-medium">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
 
-            {errorMsg && (
-              <div className="mb-4 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSave} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                  Asset Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Lift A1, STP Plant, Generator"
-                  value={assetName}
-                  onChange={(e) => setAssetName(e.target.value)}
-                  className="w-full h-10 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                  Location *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Block A, Basement, Roof"
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  className="w-full h-10 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                    Last Service Date
-                  </label>
-                  <input
-                    type="date"
-                    value={lastServiceDate}
-                    onChange={(e) => setLastServiceDate(e.target.value)}
-                    className="w-full h-10 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                  />
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Asset / Facility Name *</label>
+                  <input type="text" required placeholder="e.g. Lift A1" value={assetName} onChange={(e) => setAssetName(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition" />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                    Next Due Date
-                  </label>
-                  <input
-                    type="date"
-                    value={nextDueDate}
-                    onChange={(e) => setNextDueDate(e.target.value)}
-                    className="w-full h-10 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                    Service Cost ($)
-                  </label>
-                  <div className="relative">
-                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                    <input
-                      type="number"
-                      min="0"
-                      value={cost}
-                      onChange={(e) => setCost(e.target.value)}
-                      className="w-full h-10 pl-8 pr-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                    />
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Category *</label>
+                    <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition cursor-pointer">
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Priority</label>
+                    <select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition cursor-pointer">
+                      {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
                   </div>
                 </div>
+
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as any)}
-                    className="w-full h-10 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                  >
-                    <option value="Healthy">Healthy</option>
-                    <option value="Due Soon">Due Soon</option>
-                    <option value="Overdue">Overdue</option>
-                  </select>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Description</label>
+                  <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} className="w-full p-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition resize-none" placeholder="Describe the task..." />
                 </div>
-              </div>
 
-              <div className="border-t border-border/40 pt-4 mt-2 space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-primary">
-                  Vendor & Service Details
-                </h4>
-
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                      Vendor Name
-                    </label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <input
-                        type="text"
-                        placeholder="e.g. Otis Care"
-                        value={vendorName}
-                        onChange={(e) => setVendorName(e.target.value)}
-                        className="w-full h-10 pl-8 pr-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                      />
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Location</label>
+                    <select value={location} onChange={(e) => setLocation(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition cursor-pointer">
+                      <option value="">Select Location...</option>
+                      <option value="Common Area">Common Area</option>
+                      <option value="Basement">Basement</option>
+                      <option value="Clubhouse">Clubhouse</option>
+                      {blocks.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Status</label>
+                    <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition cursor-pointer">
+                      {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Scheduled Date</label>
+                    <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition cursor-pointer" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Completion Date</label>
+                    <input type="date" value={completionDate} onChange={(e) => setCompletionDate(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition cursor-pointer" />
+                  </div>
+                </div>
+
+                <div className="border-t border-border/40 pt-5 space-y-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+                    <User className="h-4 w-4" /> Vendor & Cost
+                  </h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Vendor Name</label>
+                      <input type="text" placeholder="e.g. Otis Care" value={vendorName} onChange={(e) => setVendorName(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition" />
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                      Vendor Contact
-                    </label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <input
-                        type="text"
-                        placeholder="e.g. 9876543210"
-                        value={vendorContact}
-                        onChange={(e) => setVendorContact(e.target.value)}
-                        className="w-full h-10 pl-8 pr-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
-                      />
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1.5">Service Cost ($)</label>
+                      <input type="number" min="0" value={cost} onChange={(e) => setCost(e.target.value)} className="w-full h-11 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition" />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex gap-2 justify-end border-t border-border/40 pt-4 mt-6">
-                {selectedAsset && (
-                  <button
-                    type="button"
-                    disabled={saving}
-                    onClick={handleDelete}
-                    className="h-10 px-4 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive text-sm font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
-                  >
+              {/* Modal Footer (Fixed at bottom) */}
+              <div className="px-6 py-4 border-t border-border/40 flex items-center justify-end gap-3 shrink-0 bg-background/50">
+                {selectedTask && (
+                  <button type="button" disabled={saving} onClick={handleDelete} className="h-10 px-4 mr-auto rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive text-sm font-bold flex items-center gap-2 transition disabled:opacity-50">
                     <Trash2 className="h-4 w-4" /> Delete
                   </button>
                 )}
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => setOpenModal(false)}
-                  className="h-10 px-4 rounded-lg hover:bg-foreground/5 text-sm font-medium transition"
-                >
+                <button type="button" disabled={saving} onClick={() => setOpenModal(false)} className="h-10 px-5 rounded-lg bg-foreground/5 hover:bg-foreground/10 text-sm font-bold transition">
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex h-10 px-4 items-center gap-2 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <button type="submit" disabled={saving} className="inline-flex h-10 px-6 items-center gap-2 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-bold shadow-elegant hover:shadow-glow transition disabled:opacity-50 disabled:cursor-not-allowed">
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {selectedAsset ? "Save Changes" : "Schedule Service"}
+                  {selectedTask ? "Save Changes" : "Add Task"}
                 </button>
               </div>
             </form>

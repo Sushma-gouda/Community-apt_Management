@@ -2,8 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/services/supabase/client";
 
 const supabaseAdminClient = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY,
+  import.meta.env.VITE_SUPABASE_URL as string,
+  (import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY) as string,
   { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
@@ -77,11 +77,16 @@ export type VisitorRow = {
 export type NoticeRow = {
   id: string;
   title: string;
-  body: string | null;
-  target_block: string;
-  tag: string | null;
-  pinned: boolean;
-  published_at: string;
+  content: string;
+  category: string;
+  priority: string;
+  target_audience: string;
+  target_block: string | null;
+  publish_date: string;
+  expiry_date: string | null;
+  scheduled_at: string | null;
+  created_by: string | null;
+  created_at: string;
 };
 export type ParkingSlotRow = {
   id: string;
@@ -362,14 +367,87 @@ export async function fetchRecentVisitors(limit: number): Promise<VisitorDetaile
   const all = await fetchVisitorsDetailed();
   return all.slice(0, limit);
 }
-
 export async function fetchVisitorsAll(): Promise<VisitorDetailed[]> {
   return fetchVisitorsDetailed();
 }
 
-export async function fetchNotices(limit: number): Promise<NoticeRow[]> {
-  const { data, error } = await supabase.from("notices").select("*").order("published_at", { ascending: false }).limit(limit);
-  return error ? [] : (data as NoticeRow[]) ?? [];
+// ==== NOTICES ====
+
+function mapDBNotice(row: any): NoticeRow {
+  return {
+    id: row.id,
+    title: row.title,
+    content: row.body || "",
+    category: row.tag || "General",
+    priority: row.pinned ? "Important" : "Normal",
+    target_audience: row.target_block === "all" ? "All Residents" : "Specific Block",
+    target_block: row.target_block === "all" ? null : row.target_block,
+    publish_date: row.published_at,
+    expiry_date: null,
+    scheduled_at: row.scheduled_at || null,
+    created_by: "Admin",
+    created_at: row.published_at
+  };
+}
+
+function mapNoticeToDB(args: any) {
+  const db: any = {};
+  if (args.title !== undefined) db.title = args.title;
+  if (args.content !== undefined) db.body = args.content;
+  if (args.category !== undefined) db.tag = args.category;
+  if (args.priority !== undefined) db.pinned = args.priority === "Urgent" || args.priority === "Important";
+  if (args.target_audience !== undefined || args.target_block !== undefined) {
+    db.target_block = args.target_audience === "All Residents" ? "all" : (args.target_block || "all");
+  }
+  if (args.publish_date !== undefined) db.published_at = args.publish_date;
+  if (args.scheduled_at !== undefined) db.scheduled_at = args.scheduled_at;
+  return db;
+}
+
+export async function fetchAdminNotices(): Promise<NoticeRow[]> {
+  const { data, error } = await supabase.from("notices").select("*").order("published_at", { ascending: false });
+  return error ? [] : (data || []).map(mapDBNotice);
+}
+
+export async function fetchResidentNotices(limit?: number): Promise<NoticeRow[]> {
+  let query = supabase.from("notices").select("*").order("published_at", { ascending: false });
+  if (limit) query = query.limit(limit);
+  const { data, error } = await query;
+  return error ? [] : (data || []).map(mapDBNotice);
+}
+
+export async function createNotice(args: Omit<NoticeRow, "id" | "created_at" | "created_by">): Promise<{ error: string | null }> {
+  const dbPayload = mapNoticeToDB(args);
+  dbPayload.id = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).substring(2);
+  
+  try {
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timed out. Please check your connection.")), 8000));
+    const res: any = await Promise.race([
+      supabase.from("notices").insert([dbPayload]),
+      timeout
+    ]);
+    return res.error ? { error: res.error.message } : { error: null };
+  } catch (err: any) {
+    return { error: err.message };
+  }
+}
+
+export async function updateNotice(id: string, args: Partial<NoticeRow>): Promise<{ error: string | null }> {
+  try {
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("Request timed out. Please check your connection.")), 8000));
+    const res: any = await Promise.race([
+      supabase.from("notices").update(mapNoticeToDB(args)).eq("id", id),
+      timeout
+    ]);
+    return res.error ? { error: res.error.message } : { error: null };
+  } catch (err: any) {
+    return { error: err.message };
+  }
+}
+
+export async function deleteNotice(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("notices").delete().eq("id", id);
+  return error ? { error: error.message } : { error: null };
 }
 
 export async function fetchResidentsDetailed(): Promise<Array<ResidentRow & { flat_number: string; block_name: string }>> {
@@ -956,12 +1034,15 @@ export async function fetchActiveVisitorsDetailed(): Promise<VisitorDetailed[]> 
 export type MaintenanceRow = {
   id: number;
   asset_name: string;
+  category: string;
+  description: string;
   location: string;
-  last_service_date: string | null;
-  next_due_date: string | null;
+  scheduled_date: string | null;
+  completion_date: string | null;
   cost: number;
   vendor_name: string;
   vendor_contact: string;
+  priority: string;
   status: string;
 };
 
@@ -969,21 +1050,25 @@ export async function fetchMaintenanceAll(): Promise<MaintenanceRow[]> {
   const { data, error } = await supabase
     .from("maintenance")
     .select("*")
-    .order("next_due_date", { ascending: true });
+    .order("scheduled_date", { ascending: true });
   return error ? [] : (data as MaintenanceRow[]) ?? [];
 }
 
 export async function insertMaintenanceEntry(args: {
   asset_name: string;
+  category: string;
+  description: string;
   location: string;
-  last_service_date: string | null;
-  next_due_date: string | null;
+  scheduled_date: string | null;
+  completion_date: string | null;
   cost: number;
   vendor_name: string;
   vendor_contact: string;
+  priority: string;
   status: string;
 }): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("maintenance").insert(args);
+  const payload: any = { ...args };
+  const { error } = await supabase.from("maintenance").insert(payload);
   return error ? { error: error.message } : { error: null };
 }
 
@@ -991,21 +1076,25 @@ export async function updateMaintenanceEntry(
   id: number,
   args: {
     asset_name?: string;
+    category?: string;
+    description?: string;
     location?: string;
-    last_service_date?: string | null;
-    next_due_date?: string | null;
+    scheduled_date?: string | null;
+    completion_date?: string | null;
     cost?: number;
     vendor_name?: string;
     vendor_contact?: string;
+    priority?: string;
     status?: string;
   }
 ): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("maintenance").update(args).eq("id", id);
+  const payload: any = { ...args };
+  const { error } = await supabase.from("maintenance").update(payload).eq("id", id);
   return error ? { error: error.message } : { error: null };
 }
 
 export async function deleteMaintenanceEntry(id: number): Promise<{ error: string | null }> {
   const { error } = await supabase.from("maintenance").delete().eq("id", id);
   return error ? { error: error.message } : { error: null };
-}
 
+}

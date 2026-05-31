@@ -1,233 +1,139 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { Megaphone, Pin, Bell, BellOff } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { Megaphone, Search, Clock, Calendar, AlertCircle, FileText } from "lucide-react";
 import { Badge, Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { PageHeader } from "@/components/dashboard/PageHeader";
 import { residentNav } from "@/components/dashboard/residentNav";
-import { FilterPill, PageHeader } from "@/components/dashboard/PageHeader";
+import { fetchResidentNotices, NoticeRow } from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/resident/notices")({
-  head: () => ({ meta: [{ title: "Notices — Communa" }] }),
-  component: ResidentNotices,
+  component: ResidentNoticesPage,
 });
 
-type Notice = {
-  id: number;
-  title: string;
-  body: string;
-  target: string;
-  date: string;
-  pinned: boolean;
-  tag: string;
-  tone: "warning" | "danger" | "success" | "primary" | "accent";
-  read: boolean;
-};
+function ResidentNoticesPage() {
+  const [data, setData] = useState<NoticeRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterCategory, setFilterCategory] = useState("All");
 
-const seed: Notice[] = [
-  {
-    id: 1,
-    title: "Water tank cleaning on Sunday",
-    body: "There will be no water supply between 9 AM and 1 PM on May 18. Please store water in advance. This applies to all blocks.",
-    target: "All Blocks",
-    date: "May 11, 2026",
-    pinned: true,
-    tag: "Important",
-    tone: "warning",
-    read: false,
-  },
-  {
-    id: 2,
-    title: "Fire drill scheduled — May 22",
-    body: "A mandatory fire drill is scheduled at 11 AM on May 22. All residents are requested to participate and follow the evacuation procedure.",
-    target: "All Blocks",
-    date: "May 09, 2026",
-    pinned: false,
-    tag: "Safety",
-    tone: "danger",
-    read: false,
-  },
-  {
-    id: 3,
-    title: "New gym equipment arrived",
-    body: "New treadmills, dumbbells, and resistance bands have been installed in the community gym. Open from 6 AM to 10 PM daily.",
-    target: "All Blocks",
-    date: "May 05, 2026",
-    pinned: false,
-    tag: "Amenity",
-    tone: "success",
-    read: true,
-  },
-  {
-    id: 4,
-    title: "Block B lift maintenance",
-    body: "The lift in Block B will be unavailable on May 18 from 10 AM to 4 PM for quarterly maintenance. Please use the staircase.",
-    target: "Block B",
-    date: "May 03, 2026",
-    pinned: false,
-    tag: "Maintenance",
-    tone: "primary",
-    read: false,
-  },
-  {
-    id: 5,
-    title: "Community Diwali celebration",
-    body: "Join us for the annual Diwali celebration at the clubhouse on November 12 at 7 PM. Bring your family and enjoy the festivities!",
-    target: "All Blocks",
-    date: "Apr 28, 2026",
-    pinned: false,
-    tag: "Event",
-    tone: "accent",
-    read: true,
-  },
-  {
-    id: 6,
-    title: "Updated visitor entry policy",
-    body: "Effective May 1, all visitors must be pre-approved by residents via the Communa app. Walk-in visitors will require OTP verification at the gate.",
-    target: "All Blocks",
-    date: "Apr 25, 2026",
-    pinned: false,
-    tag: "Policy",
-    tone: "primary",
-    read: true,
-  },
-];
+  const CATEGORIES = ["General", "Maintenance", "Security", "Events", "Emergency", "Billing", "Other"];
 
-function ResidentNotices() {
-  const [notices, setNotices] = useState(seed);
-  const [filter, setFilter] = useState("All");
+  useEffect(() => {
+    fetchResidentNotices().then((res) => {
+      setData(res);
+      setLoading(false);
+    });
+  }, []);
 
-  const tags = ["All", "Important", "Safety", "Maintenance", "Amenity", "Event", "Policy"];
-  const filtered = notices.filter((n) => filter === "All" || n.tag === filter);
-  const unread = notices.filter((n) => !n.read).length;
+  const filteredNotices = useMemo(() => {
+    return data.filter((n) => {
+      if (filterCategory !== "All" && n.category !== filterCategory) return false;
+      const q = searchQuery.toLowerCase().trim();
+      if (!q) return true;
+      return n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q);
+    });
+  }, [data, searchQuery, filterCategory]);
 
-  const markRead = (id: number) => {
-    setNotices((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
-  };
-
-  const markAllRead = () => {
-    setNotices((prev) => prev.map((n) => ({ ...n, read: true })));
+  const getToneForPriority = (p: string) => {
+    if (p === "Urgent") return "danger";
+    if (p === "Important") return "warning";
+    return "primary";
   };
 
   return (
     <DashboardLayout role="Resident" items={residentNav}>
-      <div className="space-y-6 animate-fade-up">
+      <div className="space-y-6 animate-fade-up max-w-5xl mx-auto">
         <PageHeader
           title="Notices & Announcements"
-          subtitle="Stay updated with community announcements."
-          actions={
-            unread > 0 ? (
-              <button
-                onClick={markAllRead}
-                className="inline-flex h-10 px-4 items-center gap-2 rounded-lg glass text-sm font-medium hover:bg-foreground/5 transition"
-              >
-                <BellOff className="h-4 w-4" /> Mark all read
-              </button>
-            ) : undefined
-          }
+          subtitle="Stay updated with the latest community news, alerts, and maintenance schedules."
         />
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="rounded-2xl glass shadow-card p-5">
-            <div className="text-xs text-muted-foreground">Total Notices</div>
-            <div className="mt-2 text-2xl font-semibold">{notices.length}</div>
-          </div>
-          <div className="rounded-2xl glass shadow-card p-5">
-            <div className="text-xs text-muted-foreground">Unread</div>
-            <div className="mt-2 text-2xl font-semibold text-[color:var(--warning)]">{unread}</div>
-          </div>
-          <div className="rounded-2xl glass shadow-card p-5">
-            <div className="text-xs text-muted-foreground">Pinned</div>
-            <div className="mt-2 text-2xl font-semibold text-primary">
-              {notices.filter((n) => n.pinned).length}
+        <Card title="All Notices">
+          <div className="flex flex-col sm:flex-row gap-4 mb-6">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search notices..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full h-10 pl-9 pr-4 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition"
+              />
             </div>
+            <select
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              className="h-10 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-1 focus:ring-ring transition cursor-pointer"
+            >
+              <option value="All">All Categories</option>
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
           </div>
-        </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-2">
-          {tags.map((t) => (
-            <FilterPill key={t} active={filter === t} onClick={() => setFilter(t)}>
-              {t}
-            </FilterPill>
-          ))}
-        </div>
+          <div className="space-y-4">
+            {loading ? (
+              <div className="py-12 text-center text-muted-foreground">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4" />
+                <p>Loading notices...</p>
+              </div>
+            ) : filteredNotices.length === 0 ? (
+              <div className="py-16 text-center text-muted-foreground bg-foreground/5 rounded-xl border border-dashed border-border/50">
+                <FileText className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                <p>No notices found matching your criteria.</p>
+              </div>
+            ) : (
+              filteredNotices.map((n) => (
+                <div key={n.id} className="p-5 rounded-xl bg-foreground/5 border border-border/50 hover:bg-foreground/10 transition group">
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                    <div className="space-y-3 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wider">
+                        <Badge tone={getToneForPriority(n.priority) as any}>
+                          {n.priority}
+                        </Badge>
+                        <Badge tone="accent">
+                          {n.category}
+                        </Badge>
+                        {n.target_audience !== "All Residents" && (
+                          <Badge tone="primary">
+                            Block {n.target_block} Only
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      <h3 className="text-lg font-bold text-foreground group-hover:text-primary transition-colors">
+                        {n.title}
+                      </h3>
+                      
+                      <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                        {n.content}
+                      </p>
+                    </div>
 
-        {/* Pinned notices */}
-        {filter === "All" && notices.some((n) => n.pinned) && (
-          <div>
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-              <Pin className="h-3.5 w-3.5" /> Pinned
-            </div>
-            <div className="grid md:grid-cols-2 gap-3">
-              {notices
-                .filter((n) => n.pinned)
-                .map((n) => (
-                  <NoticeCard key={n.id} notice={n} onRead={markRead} />
-                ))}
-            </div>
+                    <div className="shrink-0 flex sm:flex-col gap-4 sm:gap-2 text-xs text-muted-foreground bg-background/50 p-3 rounded-lg sm:text-right">
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5" />
+                        <span>Published: {new Date(n.publish_date).toLocaleDateString()}</span>
+                      </div>
+                      {n.scheduled_at && (
+                        <div className="flex items-center gap-1.5 text-primary/80">
+                          <Clock className="h-3.5 w-3.5" />
+                          <span>Scheduled: {new Date(n.scheduled_at).toLocaleDateString()}</span>
+                        </div>
+                      )}
+                      {n.expiry_date && (
+                        <div className="flex items-center gap-1.5 text-warning/80">
+                          <AlertCircle className="h-3.5 w-3.5" />
+                          <span>Expires: {new Date(n.expiry_date).toLocaleDateString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-        )}
-
-        {/* All notices */}
-        <div>
-          {filter === "All" && (
-            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-              All Notices
-            </div>
-          )}
-          <div className="grid md:grid-cols-2 gap-3">
-            {filtered
-              .filter((n) => filter !== "All" || !n.pinned)
-              .map((n) => (
-                <NoticeCard key={n.id} notice={n} onRead={markRead} />
-              ))}
-          </div>
-          {filtered.length === 0 && (
-            <div className="text-center py-16 text-muted-foreground">
-              No notices in this category.
-            </div>
-          )}
-        </div>
+        </Card>
       </div>
     </DashboardLayout>
-  );
-}
-
-function NoticeCard({ notice: n, onRead }: { notice: Notice; onRead: (id: number) => void }) {
-  return (
-    <div
-      className={`rounded-2xl glass p-5 hover:shadow-card transition cursor-pointer ${!n.read ? "border border-primary/20" : ""}`}
-      onClick={() => onRead(n.id)}
-    >
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <div className="flex items-center gap-3">
-          <div className="grid place-items-center h-10 w-10 rounded-xl bg-[image:var(--gradient-primary)] text-white shrink-0">
-            <Megaphone className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-[11px] text-muted-foreground">
-              {n.target} · {n.date}
-            </div>
-            <div className="text-sm font-semibold mt-0.5 flex items-center gap-2">
-              {n.title}
-              {!n.read && <span className="h-2 w-2 rounded-full bg-primary shrink-0" />}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {n.pinned && <Pin className="h-3.5 w-3.5 text-[color:var(--warning)]" />}
-          {!n.read ? (
-            <Bell className="h-3.5 w-3.5 text-primary" />
-          ) : (
-            <BellOff className="h-3.5 w-3.5 text-muted-foreground" />
-          )}
-        </div>
-      </div>
-      <p className="text-xs text-foreground/75 leading-relaxed line-clamp-3">{n.body}</p>
-      <div className="mt-3 flex items-center justify-between">
-        <Badge tone={n.tone}>{n.tag}</Badge>
-        {!n.read && <span className="text-xs text-primary font-medium">Tap to mark read</span>}
-      </div>
-    </div>
   );
 }

@@ -278,18 +278,18 @@ function ResidentFlat() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-lg bg-white/10 p-2">
-                        <div className="text-[9px] text-white/60 flex items-center gap-1">
-                          <MapPin className="h-2.5 w-2.5" /> Level
+                        <div className="rounded-lg bg-white/10 p-2">
+                          <div className="text-[9px] text-white/60 flex items-center gap-1">
+                            <MapPin className="h-2.5 w-2.5" /> Type
+                          </div>
+                          <div className="text-xs font-semibold">{data.parking.vehicle_type}</div>
                         </div>
-                        <div className="text-xs font-semibold">{data.parking.level}</div>
-                      </div>
-                      <div className="rounded-lg bg-white/10 p-2">
-                        <div className="text-[9px] text-white/60 flex items-center gap-1">
-                          <MapPin className="h-2.5 w-2.5" /> Zone
+                        <div className="rounded-lg bg-white/10 p-2">
+                          <div className="text-[9px] text-white/60 flex items-center gap-1">
+                            <MapPin className="h-2.5 w-2.5" /> Plate
+                          </div>
+                          <div className="text-xs font-semibold">{data.parking.plate_number}</div>
                         </div>
-                        <div className="text-xs font-semibold">{data.parking.zone || "N/A"}</div>
-                      </div>
                     </div>
                   </div>
                 ) : (

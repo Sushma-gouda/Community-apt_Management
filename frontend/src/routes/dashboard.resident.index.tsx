@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
   fetchComplaintsForResident,
   fetchBillsForResident,
-  fetchNotices,
+  fetchResidentNotices,
   fetchResidentParking,
   insertVisitor,
   type ComplaintRow,
@@ -54,7 +54,7 @@ function ResidentDashboard() {
     fetchResidentParking().then((slots) => {
       if (slots.length > 0) setParking(slots[0] as any);
     });
-    fetchNotices(3).then(setNotices);
+    fetchResidentNotices(3).then(setNotices);
   }, [residentHome]);
 
   const handleVisitor = async () => {
@@ -160,16 +160,16 @@ function ResidentDashboard() {
                           <h4 className="font-medium group-hover:text-primary transition">
                             {n.title}
                           </h4>
-                          {n.pinned && (
+                          {(n.priority === "Urgent" || n.priority === "Important") && (
                             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                           )}
                         </div>
-                        <p className="text-sm text-muted-foreground line-clamp-1">{n.body}</p>
+                        <p className="text-sm text-muted-foreground line-clamp-1">{n.content}</p>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
                           <Clock className="h-3 w-3" />
-                          {new Date(n.published_at).toLocaleDateString()}
-                          <span>·</span>
-                          <span className="capitalize">{n.tag || "General"}</span>
+                          {new Date(n.publish_date).toLocaleDateString()}
+                          <span>•</span>
+                          <span className="capitalize">{n.category || "General"}</span>
                         </div>
                       </div>
                     </div>

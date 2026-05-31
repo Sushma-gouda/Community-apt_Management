@@ -219,7 +219,7 @@ function ResidentsPage() {
           <div className="flex flex-wrap items-center gap-2 mb-3">
             {blockOptions.map((b) => (
               <FilterPill key={b} active={block === b} onClick={() => setBlock(b)}>
-                {b === "All" ? "All Blocks" : `Block ${b}`}
+                {b === "All" ? "All Blocks" : b}
               </FilterPill>
             ))}
           </div>
@@ -241,7 +241,7 @@ function ResidentsPage() {
                       <div className="flex-1 min-w-0">
                         <div className="font-medium">{r.name}</div>
                         <div className="text-xs text-muted-foreground">
-                          {r.flat} · Block {r.block}
+                          {r.flat} · {r.block}
                         </div>
                       </div>
                       <Badge tone={r.status === "Active" ? "success" : "muted"}>{r.status}</Badge>
@@ -279,7 +279,7 @@ function ResidentsPage() {
                         <td className="px-2 py-3 text-foreground/80">{r.email}</td>
                         <td className="px-2 py-3 text-foreground/80">{r.phone}</td>
                         <td className="px-2 py-3">{r.flat}</td>
-                        <td className="px-2 py-3">Block {r.block}</td>
+                        <td className="px-2 py-3">{r.block}</td>
                         <td className="px-2 py-3">
                           <Badge tone={r.status === "Active" ? "success" : "muted"}>{r.status}</Badge>
                         </td>
@@ -352,7 +352,8 @@ function ResidentsPage() {
                       phone: selected.phone === "—" ? "" : selected.phone,
                       block_id: "", // Not used for edit
                       flat_id: selected.flat_id,
-                      family_count: selected.family
+                      family_count: selected.family,
+                      password: ""
                     });
                     setIsEditModalOpen(true);
                   }}>

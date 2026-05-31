@@ -22,6 +22,7 @@ import { Route as DashboardResidentSettingsRouteImport } from './routes/dashboar
 import { Route as DashboardResidentProfileRouteImport } from './routes/dashboard.resident.profile'
 import { Route as DashboardResidentParkingRouteImport } from './routes/dashboard.resident.parking'
 import { Route as DashboardResidentNoticesRouteImport } from './routes/dashboard.resident.notices'
+import { Route as DashboardResidentMaintenanceRouteImport } from './routes/dashboard.resident.maintenance'
 import { Route as DashboardResidentFlatRouteImport } from './routes/dashboard.resident.flat'
 import { Route as DashboardResidentComplaintsRouteImport } from './routes/dashboard.resident.complaints'
 import { Route as DashboardResidentBillingRouteImport } from './routes/dashboard.resident.billing'
@@ -107,6 +108,12 @@ const DashboardResidentNoticesRoute =
     path: '/dashboard/resident/notices',
     getParentRoute: () => rootRouteImport,
   } as any)
+const DashboardResidentMaintenanceRoute =
+  DashboardResidentMaintenanceRouteImport.update({
+    id: '/dashboard/resident/maintenance',
+    path: '/dashboard/resident/maintenance',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const DashboardResidentFlatRoute = DashboardResidentFlatRouteImport.update({
   id: '/dashboard/resident/flat',
   path: '/dashboard/resident/flat',
@@ -188,6 +195,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/resident/billing': typeof DashboardResidentBillingRoute
   '/dashboard/resident/complaints': typeof DashboardResidentComplaintsRoute
   '/dashboard/resident/flat': typeof DashboardResidentFlatRoute
+  '/dashboard/resident/maintenance': typeof DashboardResidentMaintenanceRoute
   '/dashboard/resident/notices': typeof DashboardResidentNoticesRoute
   '/dashboard/resident/parking': typeof DashboardResidentParkingRoute
   '/dashboard/resident/profile': typeof DashboardResidentProfileRoute
@@ -215,6 +223,7 @@ export interface FileRoutesByTo {
   '/dashboard/resident/billing': typeof DashboardResidentBillingRoute
   '/dashboard/resident/complaints': typeof DashboardResidentComplaintsRoute
   '/dashboard/resident/flat': typeof DashboardResidentFlatRoute
+  '/dashboard/resident/maintenance': typeof DashboardResidentMaintenanceRoute
   '/dashboard/resident/notices': typeof DashboardResidentNoticesRoute
   '/dashboard/resident/parking': typeof DashboardResidentParkingRoute
   '/dashboard/resident/profile': typeof DashboardResidentProfileRoute
@@ -243,6 +252,7 @@ export interface FileRoutesById {
   '/dashboard/resident/billing': typeof DashboardResidentBillingRoute
   '/dashboard/resident/complaints': typeof DashboardResidentComplaintsRoute
   '/dashboard/resident/flat': typeof DashboardResidentFlatRoute
+  '/dashboard/resident/maintenance': typeof DashboardResidentMaintenanceRoute
   '/dashboard/resident/notices': typeof DashboardResidentNoticesRoute
   '/dashboard/resident/parking': typeof DashboardResidentParkingRoute
   '/dashboard/resident/profile': typeof DashboardResidentProfileRoute
@@ -272,6 +282,7 @@ export interface FileRouteTypes {
     | '/dashboard/resident/billing'
     | '/dashboard/resident/complaints'
     | '/dashboard/resident/flat'
+    | '/dashboard/resident/maintenance'
     | '/dashboard/resident/notices'
     | '/dashboard/resident/parking'
     | '/dashboard/resident/profile'
@@ -299,6 +310,7 @@ export interface FileRouteTypes {
     | '/dashboard/resident/billing'
     | '/dashboard/resident/complaints'
     | '/dashboard/resident/flat'
+    | '/dashboard/resident/maintenance'
     | '/dashboard/resident/notices'
     | '/dashboard/resident/parking'
     | '/dashboard/resident/profile'
@@ -326,6 +338,7 @@ export interface FileRouteTypes {
     | '/dashboard/resident/billing'
     | '/dashboard/resident/complaints'
     | '/dashboard/resident/flat'
+    | '/dashboard/resident/maintenance'
     | '/dashboard/resident/notices'
     | '/dashboard/resident/parking'
     | '/dashboard/resident/profile'
@@ -354,6 +367,7 @@ export interface RootRouteChildren {
   DashboardResidentBillingRoute: typeof DashboardResidentBillingRoute
   DashboardResidentComplaintsRoute: typeof DashboardResidentComplaintsRoute
   DashboardResidentFlatRoute: typeof DashboardResidentFlatRoute
+  DashboardResidentMaintenanceRoute: typeof DashboardResidentMaintenanceRoute
   DashboardResidentNoticesRoute: typeof DashboardResidentNoticesRoute
   DashboardResidentParkingRoute: typeof DashboardResidentParkingRoute
   DashboardResidentProfileRoute: typeof DashboardResidentProfileRoute
@@ -459,6 +473,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardResidentNoticesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard/resident/maintenance': {
+      id: '/dashboard/resident/maintenance'
+      path: '/dashboard/resident/maintenance'
+      fullPath: '/dashboard/resident/maintenance'
+      preLoaderRoute: typeof DashboardResidentMaintenanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard/resident/flat': {
       id: '/dashboard/resident/flat'
       path: '/dashboard/resident/flat'
@@ -562,6 +583,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardResidentBillingRoute: DashboardResidentBillingRoute,
   DashboardResidentComplaintsRoute: DashboardResidentComplaintsRoute,
   DashboardResidentFlatRoute: DashboardResidentFlatRoute,
+  DashboardResidentMaintenanceRoute: DashboardResidentMaintenanceRoute,
   DashboardResidentNoticesRoute: DashboardResidentNoticesRoute,
   DashboardResidentParkingRoute: DashboardResidentParkingRoute,
   DashboardResidentProfileRoute: DashboardResidentProfileRoute,

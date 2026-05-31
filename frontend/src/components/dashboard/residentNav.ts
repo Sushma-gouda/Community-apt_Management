@@ -6,6 +6,7 @@ import {
   CreditCard,
   Car,
   Megaphone,
+  Wrench,
   Settings,
 } from "lucide-react";
 import type { NavItem } from "./DashboardLayout";
@@ -18,5 +19,6 @@ export const residentNav: NavItem[] = [
   { label: "Billing", to: "/dashboard/resident/billing", icon: CreditCard },
   { label: "Parking", to: "/dashboard/resident/parking", icon: Car },
   { label: "Notices", to: "/dashboard/resident/notices", icon: Megaphone },
+  { label: "Maintenance", to: "/dashboard/resident/maintenance", icon: Wrench },
   { label: "Settings", to: "/dashboard/resident/settings", icon: Settings },
 ];
