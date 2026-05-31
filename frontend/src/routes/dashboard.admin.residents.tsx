@@ -10,7 +10,7 @@ import {
   deleteResident, 
   fetchBlocks, 
   fetchVacantFlatsByBlock,
-  registerResidentRpc 
+  adminCreateResident 
 } from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/admin/residents")({
@@ -50,7 +50,8 @@ function ResidentsPage() {
     phone: "",
     block_id: "",
     flat_id: "",
-    family_count: 1
+    family_count: 1,
+    password: ""
   });
 
   async function load() {
@@ -60,12 +61,13 @@ function ResidentsPage() {
       setData(
         rows.map((r) => ({
           id: r.id,
-          name: r.full_name,
+          // `r.name` is the actual DB column; `r.full_name` is an alias added in fetchResidentsDetailed
+          name: (r as any).name || (r as any).full_name || "Unknown",
           email: r.email,
           phone: r.phone || "—",
           flat: r.flat_number,
           block: r.block_name,
-          status: "Active",
+          status: r.status === "inactive" ? "Inactive" : "Active",
           since: r.created_at ? new Date(r.created_at).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "—",
           family: r.family_count || 0,
           flat_id: r.flat_id
@@ -117,19 +119,24 @@ function ResidentsPage() {
   const handleAddResident = async () => {
     if (!form.full_name || !form.email || !form.flat_id) return alert("Please fill required fields");
     
-    const { error } = await registerResidentRpc({
+    const flat = availableFlats.find(f => f.id === form.flat_id);
+
+    const { error } = await adminCreateResident({
       flatId: form.flat_id,
       fullName: form.full_name,
       email: form.email,
       phone: form.phone,
-      familyCount: form.family_count
+      familyCount: form.family_count,
+      password: form.password || undefined,
+      blockId: form.block_id,
+      flatNumber: flat?.flat_number
     });
 
     if (error) {
       alert("Error: " + error);
     } else {
       setIsAddModalOpen(false);
-      setForm({ full_name: "", email: "", phone: "", block_id: "", flat_id: "", family_count: 1 });
+      setForm({ full_name: "", email: "", phone: "", block_id: "", flat_id: "", family_count: 1, password: "" });
       load();
     }
   };
@@ -152,8 +159,9 @@ function ResidentsPage() {
 
     console.log("[Residents] Updating resident:", selected.id, form);
     
+    // `name` is the actual column in the `residents` table (not `full_name`)
     const { error } = await updateResident(selected.id, {
-      full_name: form.full_name,
+      name: form.full_name,
       email: form.email,
       phone: form.phone,
       family_count: form.family_count || 1
@@ -166,6 +174,18 @@ function ResidentsPage() {
       setIsEditModalOpen(false);
       setSelected(null);
       await load();
+    }
+  };
+
+  const handleToggleStatus = async () => {
+    if (!selected) return;
+    const newStatus = selected.status === "Active" ? "inactive" : "active";
+    const { error } = await updateResident(selected.id, { status: newStatus });
+    if (error) {
+      alert("Error updating status: " + error);
+    } else {
+      setSelected({ ...selected, status: newStatus === "active" ? "Active" : "Inactive" });
+      load();
     }
   };
 
@@ -339,6 +359,9 @@ function ResidentsPage() {
                     <Pencil className="h-4 w-4 mr-2" />
                     Edit Profile
                   </PrimaryButton>
+                  <GhostButton onClick={handleToggleStatus}>
+                    {selected.status === "Active" ? "Set Inactive" : "Set Active"}
+                  </GhostButton>
                   <button 
                     onClick={() => handleDelete(selected)}
                     className="h-10 px-4 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 transition flex items-center gap-2"
@@ -411,17 +434,27 @@ function ResidentsPage() {
               </SelectInput>
             </Field>
           </div>
-          <Field label="Family Members">
-            <TextInput 
-              type="number"
-              min="1"
-              value={form.family_count || ""} 
-              onChange={e => {
-                const val = parseInt(e.target.value);
-                setForm({...form, family_count: isNaN(val) ? 0 : val});
-              }} 
-            />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Family Members">
+              <TextInput 
+                type="number"
+                min="1"
+                value={form.family_count || ""} 
+                onChange={e => {
+                  const val = parseInt(e.target.value);
+                  setForm({...form, family_count: isNaN(val) ? 0 : val});
+                }} 
+              />
+            </Field>
+            <Field label="Set Password (Optional)">
+              <TextInput 
+                type="password"
+                value={form.password || ""} 
+                onChange={e => setForm({...form, password: e.target.value})} 
+                placeholder="Leave blank to let them sign up"
+              />
+            </Field>
+          </div>
         </div>
       </Modal>
 

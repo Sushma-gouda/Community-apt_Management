@@ -7,6 +7,7 @@ import {
   adminComplaintStats,
   adminUnpaidBillsTotal,
   adminActiveVisitorCount,
+  adminParkingStats,
   fetchRecentComplaints,
   fetchRecentBills,
   fetchFlatsWithBlocks,
@@ -42,6 +43,8 @@ function AdminDashboard() {
     complaints: 0,
     unpaidBills: 0,
     activeVisitors: 0,
+    parkingOccupied: 0,
+    parkingTotal: 40,
   });
 
   const [complaintsList, setComplaintsList] = useState<ComplaintRow[]>([]);
@@ -55,7 +58,8 @@ function AdminDashboard() {
       adminComplaintStats(),
       adminUnpaidBillsTotal(),
       adminActiveVisitorCount(),
-    ]).then(([res, flats, comp, bills, vis]) => {
+      adminParkingStats(),
+    ]).then(([res, flats, comp, bills, vis, parking]) => {
       setStats({
         residents: res,
         flatsOccupied: flats.occupied,
@@ -63,6 +67,8 @@ function AdminDashboard() {
         complaints: comp.open,
         unpaidBills: bills,
         activeVisitors: vis,
+        parkingOccupied: parking.occupied,
+        parkingTotal: parking.total,
       });
     });
 
@@ -71,12 +77,12 @@ function AdminDashboard() {
 
     fetchFlatsWithBlocks().then((flats) => {
       const blockMap = new Map<string, { total: number; occupied: number }>();
-      flats.forEach((f) => {
-        const b: string = (f.blocks as any)?.[0]?.name ?? "Unknown";
+      (flats as any[]).forEach((f) => {
+        const b: string = (f.blocks as any)?.name ?? "Unknown";
         if (!blockMap.has(b)) blockMap.set(b, { total: 0, occupied: 0 });
         const stat = blockMap.get(b)!;
         stat.total += 1;
-        if (f.status === "occupied") stat.occupied += 1;
+        if (String(f.status).toLowerCase() === "occupied") stat.occupied += 1;
       });
       const data = Array.from(blockMap.entries()).map(([b, stat]) => ({
         b,
@@ -148,7 +154,7 @@ function AdminDashboard() {
             icon={ShieldCheck}
             tone="success"
           />
-          <StatCard label="Parking Usage" value="—" icon={Car} tone="primary" />
+          <StatCard label="Parking Usage" value={`${stats.parkingOccupied}/${stats.parkingTotal}`} icon={Car} tone="primary" />
         </div>
 
         <div className="grid lg:grid-cols-3 gap-4">
@@ -204,7 +210,7 @@ function AdminDashboard() {
                         <td className="px-2 py-3 text-foreground/80">
                           {String(c.resident_id || "").substring(0, 8)}
                         </td>
-                        <td className="px-2 py-3 text-foreground/80">{c.flat_id || "—"}</td>
+                        <td className="px-2 py-3 text-foreground/80">{c.flat_label || "—"}</td>
                         <td className="px-2 py-3">
                           <Badge
                             tone={
@@ -256,7 +262,7 @@ function AdminDashboard() {
                       {p.label} · ₹{p.amount}
                     </div>
                     <div className="text-[11px] text-muted-foreground">
-                      {p.id} · {new Date(p.generated_at).toLocaleDateString()}
+                      {p.id} • {new Date(p.created_at).toLocaleDateString()}
                     </div>
                   </div>
                   <Badge tone={p.status === "paid" ? "success" : "warning"}>{p.status}</Badge>

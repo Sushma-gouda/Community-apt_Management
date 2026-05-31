@@ -19,7 +19,7 @@ import {
   assignParkingSlot,
   updateParkingSlot,
   deleteParkingSlot,
-  fetchFlatsWithBlocks,
+  fetchResidentsDetailed,
   type ParkingDetailed,
 } from "@/services/supabase/community";
 
@@ -37,9 +37,11 @@ type Slot = {
   dbData?: ParkingDetailed;
 };
 
+type ResidentOption = { id: string; flat_id: string; name: string; flat_number: string; block_name: string; };
+
 function ParkingPage() {
   const [data, setData] = useState<ParkingDetailed[]>([]);
-  const [flats, setFlats] = useState<any[]>([]);
+  const [residents, setResidents] = useState<ResidentOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"All" | Slot["status"]>("All");
@@ -52,8 +54,21 @@ function ParkingPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const detailedParking = await fetchParkingAllDetailed();
+      const [detailedParking, residentsData] = await Promise.all([
+        fetchParkingAllDetailed(),
+        fetchResidentsDetailed(),
+      ]);
       setData(detailedParking);
+      // Build resident options with flat_id for assignment
+      setResidents(
+        residentsData.map((r) => ({
+          id: r.id,
+          flat_id: r.flat_id,
+          name: r.full_name || r.name,
+          flat_number: r.flat_number,
+          block_name: r.block_name,
+        }))
+      );
     } catch (e) {
       console.error("Failed to load parking data:", e);
     } finally {
@@ -63,7 +78,6 @@ function ParkingPage() {
 
   useEffect(() => {
     loadData();
-    fetchFlatsWithBlocks().then(setFlats).catch(console.error);
 
     // Set up real-time subscription for instant synchronization
     const channel = supabase
@@ -154,7 +168,7 @@ function ParkingPage() {
 
   const onSave = async (p: {
     id?: string;
-    flat_id: number | string;
+    flat_id: string; // text flat_id — no numeric conversion
     slot_number: string;
     vehicle_type: "Car" | "Bike" | "EV";
     vehicle_model: string;
@@ -165,7 +179,7 @@ function ParkingPage() {
     );
     if (duplicate) {
       return {
-        error: `Parking Slot ${p.slot_number} is already assigned to Flat ${duplicate.block_name}-${duplicate.flat_number}!`,
+        error: `Parking Slot ${p.slot_number} is already assigned to ${duplicate.block_name}-${duplicate.flat_number}!`,
       };
     }
 
@@ -175,12 +189,12 @@ function ParkingPage() {
         vehicle_type: p.vehicle_type,
         vehicle_model: p.vehicle_model,
         plate_number: p.plate_number,
-        flat_id: Number(p.flat_id),
+        flat_id: p.flat_id,
         slot_number: p.slot_number,
       });
     } else {
       result = await assignParkingSlot({
-        flat_id: Number(p.flat_id),
+        flat_id: p.flat_id,
         slot_number: p.slot_number,
         vehicle_type: p.vehicle_type,
         vehicle_model: p.vehicle_model,
@@ -342,7 +356,7 @@ function ParkingPage() {
         }}
         allocation={selectedAllocation}
         prefilledSlot={prefilledSlot}
-        flats={flats}
+        residents={residents}
         onSave={onSave}
         onDelete={onDelete}
       />
@@ -355,7 +369,7 @@ function ParkingModal({
   onClose,
   allocation,
   prefilledSlot,
-  flats,
+  residents,
   onSave,
   onDelete,
 }: {
@@ -363,10 +377,10 @@ function ParkingModal({
   onClose: () => void;
   allocation: ParkingDetailed | null;
   prefilledSlot: string | null;
-  flats: any[];
+  residents: ResidentOption[];
   onSave: (p: {
     id?: string;
-    flat_id: number | string;
+    flat_id: string;
     slot_number: string;
     vehicle_type: "Car" | "Bike" | "EV";
     vehicle_model: string;
@@ -385,7 +399,7 @@ function ParkingModal({
   useEffect(() => {
     if (allocation) {
       setSlotNumber(allocation.slot_number);
-      setFlatId(String(allocation.flat_id));
+      setFlatId(String(allocation.flat_id)); // always text
       setVehicleType(allocation.vehicle_type);
       setVehicleModel(allocation.vehicle_model || "");
       setPlateNumber(allocation.plate_number);
@@ -408,10 +422,9 @@ function ParkingModal({
     setError("");
     setLoading(true);
     try {
-      const parsedFlatId = isNaN(Number(flatId)) ? flatId : Number(flatId);
       const res = await onSave({
         id: allocation?.id,
-        flat_id: parsedFlatId,
+        flat_id: flatId, // text flat_id — pass directly
         slot_number: slotNumber,
         vehicle_type: vehicleType,
         vehicle_model: vehicleModel,
@@ -509,16 +522,16 @@ function ParkingModal({
             </SelectInput>
           </Field>
 
-          <Field label="Assign to Flat">
+          <Field label="Assign to Resident">
             <SelectInput
               value={flatId}
               onChange={(e: any) => setFlatId(e.target.value)}
               disabled={loading}
             >
-              <option value="">Select Flat</option>
-              {flats.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.blocks?.name ? `${f.blocks.name} - ` : ""}{f.flat_number} {f.owner_name ? `(${f.owner_name})` : ""}
+              <option value="">Select Resident</option>
+              {residents.map((r) => (
+                <option key={r.flat_id} value={r.flat_id}>
+                  {r.block_name} - {r.flat_number} · {r.name}
                 </option>
               ))}
             </SelectInput>

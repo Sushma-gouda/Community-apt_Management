@@ -1,4 +1,11 @@
+import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/services/supabase/client";
+
+const supabaseAdminClient = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
 
 export type BlockRow = { id: string; name: string; total_flats: number };
 
@@ -21,12 +28,14 @@ export type FlatWithBlockName = FlatRow & { block_name: string };
 export type ResidentRow = {
   id: string;
   user_id?: string | null;
+  /** DB column is `name` — full_name is a duplicate column in DB, both are set on insert */
+  name: string;
   full_name: string;
   email: string;
   phone?: string | null;
   flat_id: string;
   family_count?: number | null;
-  role?: string;
+  status?: string;
   created_at?: string;
 };
 export type ComplaintRow = {
@@ -41,29 +50,19 @@ export type ComplaintRow = {
   created_at: string;
 };
 /**
- * Matches public.billing schema exactly:
- *   id           bigint generated always as identity  (auto — never pass in insert)
- *   flat_id      bigint (FK → flats.id)
- *   amount       numeric
- *   due_date     date
- *   status       text  CHECK IN ('pending','paid','overdue')  default 'pending'
- *   generated_at timestamp  default now()
- *   paid_at      timestamp
- *   payment_method text
- *   transaction_id text
- *   label        text  default 'Maintenance'
+ * Matches public.bills schema with added fields
  */
 export type BillRow = {
-  id: number;                  // bigint → number in JS
-  flat_id: number | null;      // bigint FK
+  id: string | number;
+  resident_id: string | null;
   label: string | null;
   amount: number;
-  status: "pending" | "paid" | "overdue";
-  due_date: string | null;     // date as ISO string
+  status: "pending" | "paid" | "overdue" | "unpaid";
+  due_date: string | null;
   paid_at: string | null;
-  generated_at: string;
-  payment_method: string | null;
-  transaction_id: string | null;
+  created_at: string;
+  payment_method?: string | null;
+  transaction_id?: string | null;
 };
 export type VisitorRow = {
   id: string;
@@ -115,13 +114,31 @@ export async function fetchVacantFlatsByBlock(blockId: string): Promise<FlatRow[
 }
 
 export async function fetchResidentByUserId(userId: string): Promise<{ resident: ResidentRow; flat: FlatRow; block: BlockRow; } | null> {
-  const { data: res, error: e1 } = await supabase.from("residents").select("*").eq("user_id", userId).maybeSingle();
+  const { data: res, error: e1 } = await supabase
+    .from("residents")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
   if (e1 || !res) return null;
-  const { data: row, error: e2 } = await supabase.from("flats").select(`*, blocks:block_id ( id, name, total_flats )`).eq("id", res.flat_id).maybeSingle();
+
+  const { data: row, error: e2 } = await supabase
+    .from("flats")
+    .select(`*, blocks:block_id ( id, name, total_flats )`)
+    .eq("id", res.flat_id)
+    .maybeSingle();
   if (e2 || !row) return null;
+
   const flatData = row as any;
-  const block = Array.isArray(flatData.blocks) ? flatData.blocks[0] : (flatData.blocks || { id: flatData.block_id, name: "N/A", total_flats: 0 });
-  return { resident: res as ResidentRow, flat: flatData as FlatRow, block };
+  // blocks join returns a single object (not array)
+  const block: BlockRow = flatData.blocks && !Array.isArray(flatData.blocks)
+    ? flatData.blocks
+    : Array.isArray(flatData.blocks) && flatData.blocks.length > 0
+      ? flatData.blocks[0]
+      : { id: flatData.block_id, name: "N/A", total_flats: 0 };
+
+  // Strip the nested blocks object from the flat row
+  const { blocks: _b, ...flatRest } = flatData;
+  return { resident: res as ResidentRow, flat: flatRest as FlatRow, block };
 }
 
 export async function registerResidentRpc(args: { flatId: string; fullName: string; email: string; phone: string; familyCount: number; }): Promise<{ error: string | null }> {
@@ -147,7 +164,7 @@ export async function adminComplaintStats(): Promise<{ open: number }> {
 }
 
 export async function adminUnpaidBillsTotal(): Promise<number> {
-  const { data, error } = await supabase.from("billing").select("amount, status").eq("status", "pending");
+  const { data, error } = await supabase.from("bills").select("amount, status").in("status", ["pending", "unpaid"]);
   if (error || !data) return 0;
   return data.reduce((s, b) => s + Number(b.amount), 0);
 }
@@ -166,9 +183,9 @@ export async function fetchRecentComplaints(limit: number): Promise<ComplaintRow
 function triggerOverdueUpdate(): void {
   const today = new Date().toISOString().split("T")[0];
   supabase
-    .from("billing")
+    .from("bills")
     .update({ status: "overdue" })
-    .eq("status", "pending")
+    .in("status", ["pending", "unpaid"])
     .lt("due_date", today)
     .then(
       () => {},
@@ -178,18 +195,18 @@ function triggerOverdueUpdate(): void {
 
 export async function updateOverdueBills(): Promise<void> {
   const today = new Date().toISOString().split('T')[0];
-  await supabase.from("billing").update({ status: "overdue" }).eq("status", "pending").lt("due_date", today);
+  await supabase.from("bills").update({ status: "overdue" }).in("status", ["pending", "unpaid"]).lt("due_date", today);
 }
 
 export async function fetchRecentBills(limit: number): Promise<BillRow[]> {
   triggerOverdueUpdate();
-  const { data, error } = await supabase.from("billing").select("*").order("generated_at", { ascending: false }).limit(limit);
+  const { data, error } = await supabase.from("bills").select("*").order("created_at", { ascending: false }).limit(limit);
   return error ? [] : (data as BillRow[]) ?? [];
 }
 
 export async function fetchBillsAll(): Promise<BillRow[]> {
   triggerOverdueUpdate();
-  const { data, error } = await supabase.from("billing").select("*").order("generated_at", { ascending: false });
+  const { data, error } = await supabase.from("bills").select("*").order("created_at", { ascending: false });
   return error ? [] : (data as BillRow[]) ?? [];
 }
 
@@ -201,67 +218,58 @@ export type BillDetailed = BillRow & {
 };
 
 export async function fetchBillsAllDetailed(): Promise<BillDetailed[]> {
-  // Fire overdue update in background — don't await it
   triggerOverdueUpdate();
 
-  // All three queries run in parallel
   const [billsRes, flatsRes, residentsRes] = await Promise.all([
     supabase
-      .from("billing")
-      .select("id, flat_id, label, amount, status, due_date, paid_at, generated_at, payment_method, transaction_id")
-      .order("generated_at", { ascending: false }),
+      .from("bills")
+      .select("*")
+      .order("created_at", { ascending: false }),
     supabase
       .from("flats")
       .select("id, flat_number, block_id, owner_name, blocks:block_id(name)"),
     supabase
       .from("residents")
-      .select("flat_id, full_name"),
+      .select("id, full_name, flat_id"),
   ]);
 
-  if (billsRes.error) {
-    console.error("[billing] SELECT error:", billsRes.error.message, billsRes.error.details);
-    return [];
-  }
-
   const bills = (billsRes.data ?? []) as BillRow[];
-  const flats  = (flatsRes.data  ?? []) as any[];
-  const residents = (residentsRes.data ?? []) as any[];
-
-  // Map keys: convert both sides to string so bigint ↔ text comparison always works
-  const flatMap     = new Map<string, any>(flats.map((f)    => [String(f.id),      f]));
-  const residentMap = new Map<string, any>(residents.map((r) => [String(r.flat_id), r]));
+  const flats = flatsRes.data ?? [];
+  const residents = residentsRes.data ?? [];
 
   return bills.map((b) => {
-    const flat     = flatMap.get(String(b.flat_id));
-    const resident = residentMap.get(String(b.flat_id));
+    const res = residents.find((r) => r.id === b.resident_id);
+    const f = flats.find((fl) => fl.id === res?.flat_id);
+    const bObj = Array.isArray(f?.blocks) ? f.blocks[0] : f?.blocks;
+
     return {
       ...b,
-      flat_number:   flat?.flat_number       ?? "N/A",
-      block_name:    flat?.blocks?.name      ?? "N/A",
-      resident_name: resident?.full_name     ?? flat?.owner_name ?? "—",
+      status: b.status === "unpaid" ? "pending" : b.status,
+      flat_number: f?.flat_number ?? "Unknown",
+      block_name: bObj?.name ?? "Unknown",
+      resident_name: res?.full_name ?? f?.owner_name ?? "Unknown",
     };
   });
 }
 
-export async function fetchBillsForResident(flatId: number | string): Promise<BillRow[]> {
+export async function fetchBillsForResident(residentId: string): Promise<BillRow[]> {
   triggerOverdueUpdate();
   const { data, error } = await supabase
-    .from("billing")
+    .from("bills")
     .select("*")
-    .eq("flat_id", Number(flatId))
-    .order("generated_at", { ascending: false });
+    .eq("resident_id", residentId)
+    .order("created_at", { ascending: false });
   return error ? [] : (data as BillRow[]) ?? [];
 }
 
 export async function createBill(args: {
-  flat_id: number | string;
+  resident_id: string;
   amount: number;
   due_date: string;
   label?: string;
 }): Promise<{ error: string | null }> {
-  // Only pass the 5 writeable columns — id & generated_at have DB defaults
-  const { error } = await supabase.from("billing").insert({
-    flat_id: Number(args.flat_id),
+  const { error } = await supabase.from("bills").insert({
+    resident_id: args.resident_id,
     amount:  args.amount,
     due_date: args.due_date,
     status:  "pending",
@@ -286,7 +294,7 @@ export async function createBillsBulk(args: {
     return { count: 0, error: flatErr.message };
   }
 
-  // 2. Filter occupied flats (case-insensitive — handles 'occupied' or 'Occupied')
+  // 2. Filter occupied flats
   const occupied = (allFlats ?? []).filter(
     (f) => String(f.status).toLowerCase() === "occupied"
   );
@@ -298,19 +306,33 @@ export async function createBillsBulk(args: {
     };
   }
 
-  // 3. Build insert rows — only the 5 writeable columns the DB accepts
-  //    id          → auto (generated always as identity)
-  //    generated_at → auto (default now())
-  const rows = occupied.map((f) => ({
-    flat_id:  Number(f.id),          // bigint FK
+  const flatIds = occupied.map(f => f.id);
+  const { data: residentsData, error: resErr } = await supabase
+    .from("residents")
+    .select("id, flat_id")
+    .in("flat_id", flatIds);
+    
+  if (resErr) {
+    return { count: 0, error: "Failed to fetch residents for flats: " + resErr.message };
+  }
+  
+  const residents = residentsData || [];
+  
+  if (residents.length === 0) {
+    return { count: 0, error: "No active residents found in the selected flats." };
+  }
+
+  // 3. Build insert rows for bills mapped to resident_id
+  const rows = residents.map((r) => ({
+    resident_id: r.id,
     amount:   args.amount,
     due_date: args.due_date,
     status:   "pending" as const,
     label:    args.label ?? "Maintenance",
   }));
 
-  // 4. Insert — plain insert, no chained .select() or .limit() which can cause hangs
-  const { error: insertErr } = await supabase.from("billing").insert(rows);
+  // 4. Insert
+  const { error: insertErr } = await supabase.from("bills").insert(rows);
 
   if (insertErr) {
     console.error("[billing] insert error:", insertErr.message, insertErr.details);
@@ -320,17 +342,20 @@ export async function createBillsBulk(args: {
   return { count: rows.length, error: null };
 }
 
-export async function payBill(args: { bill_id: number }): Promise<{ error: string | null }> {
-  const { error } = await supabase
-    .from("billing")
+export async function payBill(args: { bill_id: string | number }): Promise<{ error: string | null }> {
+  const { data, error } = await supabase
+    .from("bills")
     .update({
       status: "paid",
       paid_at: new Date().toISOString(),
-      payment_method: "Simulated",
-      transaction_id: `TXN-${Math.random().toString(36).substring(2, 11).toUpperCase()}`,
     })
-    .eq("id", args.bill_id);
-  return error ? { error: error.message } : { error: null };
+    .eq("id", args.bill_id)
+    .select();
+
+  if (error) return { error: error.message };
+  if (!data || data.length === 0) return { error: "Unauthorized or bill not found. Please try again." };
+  
+  return { error: null };
 }
 
 export async function fetchRecentVisitors(limit: number): Promise<VisitorDetailed[]> {
@@ -348,9 +373,24 @@ export async function fetchNotices(limit: number): Promise<NoticeRow[]> {
 }
 
 export async function fetchResidentsDetailed(): Promise<Array<ResidentRow & { flat_number: string; block_name: string }>> {
-  const { data, error } = await supabase.from("residents").select(`*, flats:flat_id ( flat_number, blocks:block_id (name) )`).order("full_name");
-  if (error) return [];
-  return (data as any[]).map(r => ({ ...r, flat_number: r.flats?.flat_number || "N/A", block_name: r.flats?.blocks?.name || "N/A" }));
+  const { data, error } = await supabase
+    .from("residents")
+    // Select both columns: `full_name` (NOT NULL) and `name` (nullable)
+    .select(`id, name, full_name, email, phone, flat_id, family_count, status, user_id, created_at,
+             flats:flat_id ( flat_number, blocks:block_id (name) )`)
+    .order("full_name");  // order by the NOT NULL column
+  if (error) {
+    console.error("[residents] fetchResidentsDetailed error:", error.message);
+    return [];
+  }
+  return (data as any[]).map((r) => ({
+    ...r,
+    // Normalize: use full_name (NOT NULL), fall back to name
+    name:       r.full_name || r.name || "Unknown",
+    full_name:  r.full_name || r.name || "Unknown",
+    flat_number: r.flats?.flat_number ?? "N/A",
+    block_name:  r.flats?.blocks?.name ?? "N/A",
+  }));
 }
 
 export async function fetchResidentsDirectory(): Promise<Array<ResidentRow & { flat_number: string; block_name: string }>> {
@@ -358,12 +398,31 @@ export async function fetchResidentsDirectory(): Promise<Array<ResidentRow & { f
 }
 
 export async function fetchFlatsWithBlocks() {
-  const { data, error } = await supabase.from("flats").select(`*, blocks:block_id (id, name)`);
-  return error ? [] : data;
+  const { data, error } = await supabase
+    .from("flats")
+    .select(`*, blocks:block_id (id, name)`)
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("[flats] fetchFlatsWithBlocks error:", error.message);
+    return [];
+  }
+  return data ?? [];
 }
 
 export async function insertFlat(args: { block_id: string; flat_number: string; floor: number | null; sqft: number | null; owner_name?: string | null; type?: string | null; }) {
-  const { error } = await supabase.from("flats").insert({ block_id: args.block_id, flat_number: args.flat_number, floor: args.floor, sqft: args.sqft, type: args.type ?? null, status: "vacant", owner_name: args.owner_name ?? null });
+  // Generate a unique ID since `flats.id` is `text primary key` with no DB default
+  const newId = "flat-" + crypto.randomUUID().replace(/-/g, "");
+  const { error } = await supabase.from("flats").insert({
+    id: newId,
+    block_id: args.block_id,
+    flat_number: args.flat_number,
+    floor: args.floor,
+    sqft: args.sqft,
+    type: args.type ?? null,
+    status: "vacant",
+    owner_name: args.owner_name ?? null,
+    created_at: new Date().toISOString(),
+  });
   return error ? { error: error.message } : { error: null };
 }
 
@@ -389,8 +448,23 @@ export async function fetchComplaintsForResident(residentId: string): Promise<Co
   return error ? [] : (data as ComplaintRow[]) ?? [];
 }
 
-export async function createComplaint(args: { resident_id: string; title: string; body: string; priority?: string; category?: string; }): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("complaints").insert({ resident_id: args.resident_id, title: args.title, description: args.body, status: "open", category: args.category || "General", priority: (args.priority || "medium").toLowerCase() });
+export async function createComplaint(args: {
+  resident_id: string;
+  title: string;
+  body: string;
+  flat_label?: string;
+  priority?: string;
+  category?: string;
+}): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("complaints").insert({
+    resident_id: args.resident_id,
+    title: args.title,
+    description: args.body,
+    flat_label: args.flat_label,
+    status: "open",
+    category: args.category || "General",
+    priority: (args.priority || "medium").toLowerCase(),
+  });
   return error ? { error: error.message } : { error: null };
 }
 
@@ -408,33 +482,168 @@ export async function updateComplaintPriority(id: string, priority: string): Pro
 export async function fetchMyProfile(): Promise<(ResidentRow & { flat_number: string; block_name: string; floor: number; sqft: number; type: string; owner_name: string }) | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
-  const { data: resident, error } = await supabase.from("residents").select(`*, flats:flat_id ( id, flat_number, floor, sqft, type, owner_name, blocks:block_id (name) )`).eq("user_id", user.id).single();
-  if (error || !resident) return null;
+
+  const { data: resident, error } = await supabase
+    .from("residents")
+    // Select both name and full_name — full_name is the NOT NULL column
+    .select(`id, name, full_name, email, phone, flat_id, family_count, status, user_id, created_at,
+             flats:flat_id ( id, flat_number, floor, sqft, type, owner_name, blocks:block_id (name) )`)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[fetchMyProfile] error:", error.message);
+    return null;
+  }
+  if (!resident) {
+    console.warn("[fetchMyProfile] no resident row found for user:", user.id);
+    return null;
+  }
+
   const f = (resident as any).flats;
-  return { ...(resident as ResidentRow), flat_number: f?.flat_number ?? "N/A", block_name: f?.blocks?.name ?? "N/A", floor: f?.floor ?? 0, sqft: f?.sqft ?? 0, type: f?.type ?? "Not specified", owner_name: f?.owner_name ?? "—" };
+  const displayName = (resident as any).full_name || resident.name || "Resident";
+  return {
+    ...(resident as ResidentRow),
+    // Normalize: prefer full_name (NOT NULL) for display
+    name:        displayName,
+    full_name:   displayName,
+    flat_number: f?.flat_number ?? "N/A",
+    block_name:  f?.blocks?.name ?? "N/A",
+    floor:       f?.floor ?? 0,
+    sqft:        f?.sqft ?? 0,
+    type:        f?.type ?? "Not specified",
+    owner_name:  f?.owner_name ?? "—",
+  };
 }
 
-export async function updateMyProfile(args: Partial<ResidentRow>): Promise<{ error: string | null }> {
+
+export async function updateMyProfile(args: {
+  name?: string;
+  phone?: string;
+  family_count?: number | null;
+}): Promise<{ error: string | null }> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
-  const { error } = await supabase.from("residents").update(args).eq("user_id", user.id);
+
+  // Use the security-definer RPC so residents can update their own row
+  // (direct update is blocked by RLS for non-admins)
+  const { error } = await supabase.rpc("update_my_resident_profile", {
+    p_name:         args.name          ?? null,
+    p_phone:        args.phone         ?? null,
+    p_family_count: args.family_count  ?? null,
+  });
+
   return error ? { error: error.message } : { error: null };
 }
 
 export async function deleteResident(id: string, flatId?: string): Promise<{ error: string | null }> {
-  if (flatId) await supabase.from("flats").update({ status: "vacant", owner_name: null }).eq("id", flatId);
-  const { error } = await supabase.from("residents").delete().eq("id", id);
+  // Use the robust RPC to ensure atomic deletion and flat status update
+  const { error } = await supabase.rpc("admin_remove_resident", {
+    p_res_id: id,
+    p_flat_id: flatId || null
+  });
+  
   return error ? { error: error.message } : { error: null };
 }
 
 export async function updateResident(id: string, args: Partial<ResidentRow>): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("residents").update(args).eq("id", id);
+  const payload = { ...args };
+  // Keep full_name in sync with name
+  if (payload.name) {
+    payload.full_name = payload.name;
+  }
+  const { error } = await supabase.from("residents").update(payload).eq("id", id);
   return error ? { error: error.message } : { error: null };
 }
 
+export async function adminCreateResident(args: {
+  flatId: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  familyCount: number;
+  password?: string;
+  blockId?: string;
+  flatNumber?: string;
+}): Promise<{ error: string | null }> {
+  if (args.password) {
+    const { error: signUpErr } = await supabaseAdminClient.auth.signUp({
+      email: args.email,
+      password: args.password,
+      options: {
+        data: {
+          role: "resident",
+          full_name: args.fullName,
+          phone: args.phone,
+          flat_id: args.flatId,
+          block_id: args.blockId || "",
+          flat_number: args.flatNumber || "",
+          family_count: args.familyCount.toString(),
+        }
+      }
+    });
+    return signUpErr ? { error: signUpErr.message } : { error: null };
+  }
+
+  const residentId = "res-" + Math.random().toString(36).substring(2, 11);
+
+  // 1. Insert into residents table — BOTH `name` AND `full_name` required (full_name is NOT NULL)
+  const { error: resErr } = await supabase.from("residents").insert({
+    id: residentId,
+    flat_id: args.flatId,
+    name: args.fullName,
+    full_name: args.fullName,
+    email: args.email,
+    phone: args.phone,
+    family_count: args.familyCount,
+    status: "active",
+    user_id: null,
+  });
+
+  if (resErr) {
+    console.error("[adminCreateResident] insert error:", resErr.message);
+    return { error: resErr.message };
+  }
+
+  // 2. Update flat status to occupied
+  const { error: flatErr } = await supabase
+    .from("flats")
+    .update({ status: "occupied", owner_name: args.fullName })
+    .eq("id", args.flatId);
+
+  if (flatErr) {
+    await supabase.from("residents").delete().eq("id", residentId);
+    return { error: flatErr.message };
+  }
+
+  return { error: null };
+}
+
+export async function checkPreRegisteredResident(email: string): Promise<{
+  found: boolean;
+  resident_id: string;
+  flat_id: string;
+  flat_number: string;
+  block_id: string;
+  block_name: string;
+  name: string;
+  phone: string;
+  family_count: number;
+} | null> {
+  const { data, error } = await supabase.rpc("check_pre_registered_resident", { p_email: email });
+  if (error || !data) return null;
+  return data as any;
+}
+
+export async function claimResidentProfile(email: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.rpc("claim_resident_profile", { p_email: email });
+  return error ? { error: error.message } : { error: null };
+}
+
+
 export type ParkingDetailed = {
   id: string; // uuid
-  flat_id: number;
+  flat_id: string; // text — matches flats.id
   slot_number: string;
   vehicle_type: "Car" | "Bike" | "EV";
   vehicle_model: string | null;
@@ -461,7 +670,8 @@ export async function fetchParkingAllDetailed(): Promise<ParkingDetailed[]> {
       .select("id, flat_number, block_id, owner_name, blocks:block_id(name)"),
     supabase
       .from("residents")
-      .select("flat_id, full_name"),
+      // DB has both `name` and `full_name` columns; prefer full_name then fall back to name
+      .select("flat_id, name, full_name"),
   ]);
 
   if (parkingRes.error) {
@@ -481,7 +691,7 @@ export async function fetchParkingAllDetailed(): Promise<ParkingDetailed[]> {
     const resident = residentMap.get(String(p.flat_id));
     return {
       id: p.id,
-      flat_id: Number(p.flat_id),
+      flat_id: String(p.flat_id), // keep as text
       slot_number: p.slot_number,
       vehicle_type: p.vehicle_type,
       vehicle_model: p.vehicle_model,
@@ -489,9 +699,17 @@ export async function fetchParkingAllDetailed(): Promise<ParkingDetailed[]> {
       allocated_at: p.allocated_at,
       flat_number: flat?.flat_number ?? "N/A",
       block_name: flat?.blocks?.name ?? "N/A",
-      resident_name: resident?.full_name ?? flat?.owner_name ?? "—",
+      resident_name: resident?.full_name ?? resident?.name ?? flat?.owner_name ?? "—",
     };
   });
+}
+
+export async function adminParkingStats(): Promise<{ total: number; occupied: number; available: number }> {
+  const { data, error } = await supabase.from("parking").select("id");
+  if (error || !data) return { total: 0, occupied: 0, available: 40 };
+  const occupied = data.length;
+  const total = 40; // fixed slot grid size
+  return { total, occupied, available: total - occupied };
 }
 
 export async function fetchResidentParking(): Promise<ParkingDetailed[]> {
@@ -500,23 +718,24 @@ export async function fetchResidentParking(): Promise<ParkingDetailed[]> {
 
   const { data: resident, error: resErr } = await supabase
     .from("residents")
-    .select("flat_id")
+    .select("flat_id, full_name, name")
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (resErr || !resident) return [];
 
-  const cleanFlatId = isNaN(Number(resident.flat_id)) ? resident.flat_id : Number(resident.flat_id);
+  // flat_id is text — use it directly
+  const flatId = String(resident.flat_id);
 
   const [parkingRes, flatsRes] = await Promise.all([
     supabase
       .from("parking")
       .select("*")
-      .eq("flat_id", cleanFlatId),
+      .eq("flat_id", flatId),
     supabase
       .from("flats")
       .select("id, flat_number, owner_name, blocks:block_id(name)")
-      .eq("id", resident.flat_id)
+      .eq("id", flatId)
       .maybeSingle(),
   ]);
 
@@ -524,34 +743,32 @@ export async function fetchResidentParking(): Promise<ParkingDetailed[]> {
 
   const parkingList = parkingRes.data as any[];
   const flat = flatsRes.data as any;
+  const residentName = resident.full_name || resident.name || flat?.owner_name || "—";
 
-  return parkingList.map((p) => {
-    const pFlatId = isNaN(Number(p.flat_id)) ? p.flat_id : Number(p.flat_id);
-    return {
-      id: p.id,
-      flat_id: pFlatId,
-      slot_number: p.slot_number,
-      vehicle_type: p.vehicle_type,
-      vehicle_model: p.vehicle_model,
-      plate_number: p.plate_number,
-      allocated_at: p.allocated_at,
-      flat_number: flat?.flat_number ?? "N/A",
-      block_name: flat?.blocks?.name ?? "N/A",
-      resident_name: flat?.owner_name ?? "—",
-    };
-  });
+  return parkingList.map((p) => ({
+    id: p.id,
+    flat_id: String(p.flat_id),
+    slot_number: p.slot_number,
+    vehicle_type: p.vehicle_type,
+    vehicle_model: p.vehicle_model,
+    plate_number: p.plate_number,
+    allocated_at: p.allocated_at,
+    flat_number: flat?.flat_number ?? "N/A",
+    block_name: flat?.blocks?.name ?? "N/A",
+    resident_name: residentName,
+  }));
 }
 
 export async function assignParkingSlot(args: {
-  flat_id: number | string;
+  flat_id: string;
   slot_number: string;
   vehicle_type: string;
   vehicle_model?: string;
   plate_number: string;
 }): Promise<{ error: string | null }> {
-  const cleanFlatId = isNaN(Number(args.flat_id)) ? args.flat_id : Number(args.flat_id);
+  // flat_id is text — use directly, no numeric conversion
   const { error } = await supabase.from("parking").insert({
-    flat_id: cleanFlatId,
+    flat_id: String(args.flat_id),
     slot_number: args.slot_number,
     vehicle_type: args.vehicle_type,
     vehicle_model: args.vehicle_model || null,
@@ -566,7 +783,7 @@ export async function updateParkingSlot(
     vehicle_type: string;
     vehicle_model?: string;
     plate_number: string;
-    flat_id?: number | string;
+    flat_id?: string;
     slot_number?: string;
   }
 ): Promise<{ error: string | null }> {
@@ -575,9 +792,8 @@ export async function updateParkingSlot(
     vehicle_model: args.vehicle_model || null,
     plate_number: args.plate_number,
   };
-  if (args.flat_id) {
-    payload.flat_id = isNaN(Number(args.flat_id)) ? args.flat_id : Number(args.flat_id);
-  }
+  // flat_id is text — no numeric conversion
+  if (args.flat_id) payload.flat_id = String(args.flat_id);
   if (args.slot_number) payload.slot_number = args.slot_number;
 
   const { error } = await supabase.from("parking").update(payload).eq("id", id);

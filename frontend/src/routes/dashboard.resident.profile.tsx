@@ -38,18 +38,21 @@ function ResidentProfile() {
       const p = await fetchMyProfile();
       if (p) {
         const mapped: Profile = {
-          name: p.full_name,
-          email: p.email,
+          // `p.name` is the actual DB column from `residents.name`
+          name: p.name ?? "",
+          email: p.email ?? "",
           phone: p.phone || "",
-          altPhone: (p as any).alternate_phone || "",
+          altPhone: "",
           flat: p.flat_number,
           block: p.block_name,
           floor: String(p.floor),
           sqft: String(p.sqft),
           familyCount: String(p.family_count || 1),
-          since: p.created_at ? new Date(p.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "—",
-          bio: (p as any).bio || "",
-          id_suffix: (p.id ? String(p.id).slice(-4).toUpperCase() : "0000"),
+          since: p.created_at
+            ? new Date(p.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+            : "—",
+          bio: "",
+          id_suffix: p.id ? String(p.id).slice(-4).toUpperCase() : "0000",
         };
         setProfile(mapped);
         setDraft(mapped);
@@ -69,11 +72,11 @@ function ResidentProfile() {
     if (!draft) return;
     setLoading(true);
     try {
+      // `name` is the actual column in the `residents` table (not `full_name`)
       const { error } = await updateMyProfile({
-        full_name: draft.name,
+        name: draft.name,
         phone: draft.phone,
         family_count: parseInt(draft.familyCount) || 1,
-        alternate_phone: draft.altPhone
       });
       if (error) {
         alert("Error saving: " + error);

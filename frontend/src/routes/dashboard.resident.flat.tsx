@@ -20,9 +20,9 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import {
   fetchMyProfile,
   fetchBillsForResident,
-  fetchParkingAll,
+  fetchResidentParking,
   type BillRow,
-  type ParkingSlotRow,
+  type ParkingDetailed,
 } from "@/services/supabase/community";
 
 export const Route = createFileRoute("/dashboard/resident/flat")({
@@ -51,7 +51,7 @@ function ResidentFlat() {
     family_count: number;
     since: string;
     bills: BillRow[];
-    parking: ParkingSlotRow | null;
+    parking: ParkingDetailed | null;
   } | null>(null);
 
   async function load() {
@@ -59,13 +59,12 @@ function ResidentFlat() {
     try {
       const p = await fetchMyProfile();
       if (p) {
-        const [bills, allParking] = await Promise.all([
-          // Pass the numeric flat_id (bigint FK), not the resident's text id
-          fetchBillsForResident((p as any).flat_id),
-          fetchParkingAll(),
+        const [bills, myParkingSlots] = await Promise.all([
+          fetchBillsForResident(p.id),
+          fetchResidentParking(),
         ]);
 
-        const myParking = allParking.find((s) => s.flat_id === (p as any).flat_id) || null;
+        const myParking = myParkingSlots.length > 0 ? myParkingSlots[0] : null;
 
         setData({
           flat_number: p.flat_number,
@@ -83,7 +82,7 @@ function ResidentFlat() {
               })
             : "—",
           bills,
-          parking: myParking,
+          parking: myParking as any,
         });
       }
     } catch (err) {
@@ -238,13 +237,13 @@ function ResidentFlat() {
                       : "No Bill",
                   },
                   {
-                    label: "Last Bill Date",
-                    value: latestBill?.generated_at
-                      ? new Date(latestBill.generated_at).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
+                    label: "Last Billed On",
+                    value: latestBill?.created_at
+                      ? new Date(latestBill.created_at).toLocaleDateString("en-US", {
+                          month: "long",
+                          year: "numeric",
                         })
-                      : "—",
+                      : "No bills yet",
                   },
                 ].map((d) => (
                   <div key={d.label} className="flex items-center justify-between text-sm">
@@ -262,7 +261,7 @@ function ResidentFlat() {
                   <div className="grid place-items-center h-10 w-10 rounded-lg bg-white/20 backdrop-blur-md">
                     <Car className="h-6 w-6" />
                   </div>
-                  <Badge tone="muted" className="bg-white/20 border-white/30 text-white">
+                  <Badge tone="muted">
                     {data.parking ? "Assigned" : "Unassigned"}
                   </Badge>
                 </div>

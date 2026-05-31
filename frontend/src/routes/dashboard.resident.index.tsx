@@ -5,12 +5,12 @@ import {
   fetchComplaintsForResident,
   fetchBillsForResident,
   fetchNotices,
-  fetchParkingAll,
+  fetchResidentParking,
   insertVisitor,
   type ComplaintRow,
   type BillRow,
   type NoticeRow,
-  type ParkingSlotRow,
+  type ParkingDetailed,
 } from "@/services/supabase/community";
 import {
   Wallet,
@@ -38,7 +38,7 @@ function ResidentDashboard() {
   const [complaints, setComplaints] = useState<ComplaintRow[]>([]);
   const [bills, setBills] = useState<BillRow[]>([]);
   const [notices, setNotices] = useState<NoticeRow[]>([]);
-  const [parking, setParking] = useState<ParkingSlotRow | null>(null);
+  const [parking, setParking] = useState<ParkingDetailed | null>(null);
 
   const [visitorName, setVisitorName] = useState("");
   const [visitorPhone, setVisitorPhone] = useState("");
@@ -46,15 +46,15 @@ function ResidentDashboard() {
   useEffect(() => {
     if (residentHome?.resident.id) {
       fetchComplaintsForResident(residentHome.resident.id).then(setComplaints);
+    }
+    if (residentHome?.resident.id) {
       fetchBillsForResident(residentHome.resident.id).then(setBills);
     }
+    // Use fetchResidentParking() which looks up by user_id → residents.flat_id → parking.flat_id
+    fetchResidentParking().then((slots) => {
+      if (slots.length > 0) setParking(slots[0] as any);
+    });
     fetchNotices(3).then(setNotices);
-    if (residentHome?.flat.id) {
-      fetchParkingAll().then((all) => {
-        const mySlot = all.find((p) => p.flat_id === residentHome.flat.id);
-        if (mySlot) setParking(mySlot);
-      });
-    }
   }, [residentHome]);
 
   const handleVisitor = async () => {
@@ -74,12 +74,13 @@ function ResidentDashboard() {
     }
   };
 
-  const displayName = residentHome?.resident.full_name || profile?.full_name || "Resident";
+  // `resident.name` is the actual DB column (not `full_name`)
+  const displayName = residentHome?.resident.name || profile?.full_name || "Resident";
   const flatDisplay = residentHome
-    ? `Flat ${residentHome.flat.flat_number} · ${residentHome.block.name} · ${residentHome.resident.family_count} family members`
+    ? `Flat ${residentHome.flat.flat_number} · ${residentHome.block.name} · ${residentHome.resident.family_count ?? 1} family member(s)`
     : "No flat assigned";
 
-  const unpaidBills = bills.filter((b) => b.status === "unpaid");
+  const unpaidBills = bills.filter((b) => b.status === "pending" || b.status === "overdue");
   const totalUnpaid = unpaidBills.reduce((acc, b) => acc + Number(b.amount), 0);
   const openComplaintsCount = complaints.filter(
     (c) => c.status === "open" || c.status === "in_progress",
@@ -111,28 +112,28 @@ function ResidentDashboard() {
           <StatCard
             label="Outstanding"
             value={`₹${totalUnpaid.toLocaleString()}`}
-            subText={unpaidBills.length > 0 ? `${unpaidBills.length} bill(s) due` : "All paid"}
+            change={unpaidBills.length > 0 ? `${unpaidBills.length} bill(s) due` : "All paid"}
             icon={Wallet}
             tone={totalUnpaid > 0 ? "warning" : "success"}
           />
           <StatCard
             label="Complaints"
             value={openComplaintsCount.toString()}
-            subText={openComplaintsCount > 0 ? "Action required" : "No open issues"}
+            change={openComplaintsCount > 0 ? "Action required" : "No open issues"}
             icon={MessageSquareWarning}
-            tone={openComplaintsCount > 0 ? "danger" : "muted"}
+            tone={openComplaintsCount > 0 ? "warning" : "primary"}
           />
           <StatCard
             label="Parking"
             value={parking ? parking.slot_number : "None"}
-            subText={parking ? `Level ${parking.level || "—"}` : "Unassigned"}
+            change={parking ? "Assigned" : "Unassigned"}
             icon={Car}
             tone="primary"
           />
           <StatCard
             label="Trust Score"
             value="98"
-            subText="Top 5% resident"
+            change="Top 5% resident"
             icon={ShieldCheck}
             tone="success"
           />
@@ -144,9 +145,8 @@ function ResidentDashboard() {
             {/* Recent Notices */}
             <Card
               title="Recent Notices"
-              icon={Megaphone}
               action={
-                <Link to="/dashboard/resident/" className="text-xs text-primary hover:underline">
+                <Link to="/dashboard/resident" className="text-xs text-primary hover:underline">
                   View all
                 </Link>
               }
@@ -183,7 +183,7 @@ function ResidentDashboard() {
 
             {/* Quick Actions */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Card title="Quick Pass" icon={ShieldCheck}>
+              <Card title="Quick Pass">
                 <p className="text-xs text-muted-foreground mb-4">
                   Generate a temporary entry pass for your guests.
                 </p>
@@ -211,7 +211,7 @@ function ResidentDashboard() {
                 </div>
               </Card>
 
-              <Card title="Maintenance" icon={Building2}>
+              <Card title="Maintenance">
                 <p className="text-xs text-muted-foreground mb-4">
                   Report a new issue or track your existing requests.
                 </p>
@@ -236,7 +236,7 @@ function ResidentDashboard() {
           {/* Sidebar */}
           <div className="space-y-6">
             {/* Bills Sidebar */}
-            <Card title="Pending Payments" icon={Wallet}>
+            <Card title="Pending Payments">
               <div className="space-y-4">
                 {unpaidBills.slice(0, 3).map((b) => (
                   <div key={b.id} className="flex items-center justify-between">
@@ -265,7 +265,7 @@ function ResidentDashboard() {
             </Card>
 
             {/* Status Tracking */}
-            <Card title="Active Requests" icon={Clock}>
+            <Card title="Active Requests">
               <div className="space-y-4">
                 {complaints
                   .filter((c) => c.status !== "resolved")

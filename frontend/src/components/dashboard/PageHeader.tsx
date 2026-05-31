@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { addFlat } from '@/services/supabase/flats'
 
 export function PageHeader({
   title,
@@ -32,6 +31,7 @@ export function PrimaryButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       className="inline-flex h-10 px-4 items-center gap-2 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition disabled:opacity-50 disabled:cursor-not-allowed"
@@ -41,11 +41,13 @@ export function PrimaryButton({
   );
 }
 
-export function GhostButton({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
+export function GhostButton({ children, onClick, disabled }: { children: ReactNode; onClick?: () => void; disabled?: boolean }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className="inline-flex h-10 px-4 items-center gap-2 rounded-lg glass text-sm font-medium hover:bg-foreground/5 transition"
+      disabled={disabled}
+      className="inline-flex h-10 px-4 items-center gap-2 rounded-lg glass text-sm font-medium hover:bg-foreground/5 transition disabled:opacity-50 disabled:cursor-not-allowed"
     >
       {children}
     </button>

@@ -55,7 +55,6 @@ function ComplaintsPage() {
       const res = await fetchResidentsDirectory();
 
       const mapped = rows
-        .filter(r => r.title.toLowerCase().trim() !== "water leakage in block a") // Case-insensitive filter
         .map((r) => {
           // Find resident to get name/flat
           const resi = res.find(re => re.id === r.resident_id);
@@ -64,7 +63,7 @@ function ComplaintsPage() {
             raw_id: String(r.id),
             title: r.title,
             desc: r.description || "",
-            by: resi?.full_name || "Unknown",
+            by: resi?.name || "Unknown",
             flat: resi?.flat_number || r.flat_label || "N/A",
             status: statusMap[r.status] || "Open",
             priority: (r.priority ? (r.priority.charAt(0).toUpperCase() + r.priority.slice(1)) as Priority : "Medium"),

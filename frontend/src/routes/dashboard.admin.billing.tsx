@@ -95,8 +95,7 @@ function BillingPage() {
       setBlocks(blockRows);
 
       const mapped: Bill[] = detailed.map((b: BillDetailed) => ({
-        // b.id is a bigint auto-increment number e.g. 42 → "INV-0042"
-        id: `INV-${String(b.id).padStart(4, "0")}`,
+        id: `INV-${String(b.id).slice(0, 6).toUpperCase()}`,
         raw_id: b.id,
         flat: b.flat_number,
         block: b.block_name,

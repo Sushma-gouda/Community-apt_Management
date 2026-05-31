@@ -53,42 +53,43 @@ function ResidentBilling() {
   const { residentHome, initialized } = useAuth();
   const [data, setData] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
+  const [payLoading, setPayLoading] = useState(false);
   const [filter, setFilter] = useState<"All" | BillStatus>("All");
   const [payModal, setPayModal] = useState<Bill | null>(null);
   const [payStep, setPayStep] = useState<"form" | "success">("form");
   const [resident, setResident] = useState<ResidentInfo>({ name: "—", flat: "—", block: "—" });
 
   async function loadData() {
-    let flatId = residentHome?.flat.id;
+    let resId = residentHome?.resident?.id;
 
-    if (!flatId && initialized) {
+    if (!resId && initialized) {
       const profile = await fetchMyProfile();
       if (profile) {
-        if (profile.flat_id) flatId = profile.flat_id;
+        if (profile.id) resId = profile.id;
         setResident({
-          name: profile.full_name ?? "—",
+          name: profile.name ?? "—",
           flat: profile.flat_number ?? "—",
           block: profile.block_name ?? "—",
         });
       }
     } else if (residentHome) {
       setResident({
-        name: (residentHome as any).resident?.full_name ?? "—",
+        name: residentHome.resident?.name ?? (residentHome as any).resident?.full_name ?? "—",
         flat: residentHome.flat?.flat_number ?? "—",
         block: (residentHome as any).block?.name ?? "—",
       });
     }
 
-    if (!flatId) { setLoading(false); return; }
+    if (!resId) { setLoading(false); return; }
 
     setLoading(true);
     try {
-      const rows = await fetchBillsForResident(flatId);
+      const rows = await fetchBillsForResident(resId);
       const mapped: Bill[] = rows.map((r) => ({
-        id: `INV-${String(r.id).padStart(4, "0")}`,
+        id: `INV-${String(r.id).slice(0, 6).toUpperCase()}`,
         raw_id: r.id,
-        month: r.generated_at
-          ? new Date(r.generated_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+        month: r.created_at
+          ? new Date(r.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
           : "N/A",
         amount: Number(r.amount),
         due: r.due_date
@@ -136,7 +137,7 @@ function ResidentBilling() {
     const now = new Date();
 
     // Primary Header block
-    doc.setFillColor(67, 56, 202); // Elegant Indigo Accent
+    doc.setFillColor(15, 23, 42); // Slate-900 Theme (Darker than receipt)
     doc.rect(0, 0, 210, 40, "F");
 
     // Title
@@ -191,7 +192,7 @@ function ResidentBilling() {
       body: tableRows,
       theme: "striped",
       headStyles: {
-        fillColor: [67, 56, 202],
+        fillColor: [30, 41, 59], // Slate-800 instead of bright purple
         textColor: [255, 255, 255],
         fontStyle: "bold",
         fontSize: 9,
@@ -252,12 +253,12 @@ function ResidentBilling() {
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
-    doc.text("PAYMENT RECEIPT", 140, 22);
+    doc.text("PAYMENT RECEIPT", 130, 22);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9.5);
     doc.setTextColor(191, 219, 254); // blue-200
-    doc.text(`Receipt No: ${b.id}`, 140, 30);
+    doc.text(`Receipt No: ${b.id}`, 130, 30);
 
     // Resident metadata header
     doc.setTextColor(30, 41, 59); // Slate-800
@@ -273,9 +274,9 @@ function ResidentBilling() {
     doc.text(`Block Name:    ${resident.block}`, 15, 75);
 
     const paidDate = b.paidOnRaw ? new Date(b.paidOnRaw).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : (b.paidOn ?? "—");
-    doc.text(`Payment Date:   ${paidDate}`, 125, 63);
-    doc.text(`Payment Method: Online / Simulated`, 125, 69);
-    doc.text(`Transaction ID: TXN-${String(b.raw_id).padStart(6, "0")}`, 125, 75);
+    doc.text(`Payment Date:   ${paidDate}`, 115, 63);
+    doc.text(`Payment Method: Online / Simulated`, 115, 69);
+    doc.text(`Transaction ID: TXN-${String(b.raw_id).replace(/-/g, "").slice(0, 10).toUpperCase()}`, 115, 75);
 
     // Divider Line
     doc.setDrawColor(226, 232, 240); // slate-200
@@ -353,16 +354,19 @@ function ResidentBilling() {
 
   const handlePay = async () => {
     if (!payModal) return;
-    const { error } = await payBill({ bill_id: payModal.raw_id as number });
-    if (error) {
-      alert("Payment failed: " + error);
-    } else {
-      setPayStep("success");
-      setTimeout(() => {
-        setPayModal(null);
-        setPayStep("form");
+    setPayLoading(true);
+    try {
+      const { error } = await payBill({ bill_id: payModal.raw_id as number });
+      if (error) {
+        alert("Payment failed: " + error);
+      } else {
+        setPayStep("success");
         loadData();
-      }, 2000);
+      }
+    } catch (e: any) {
+      alert("Error: " + e.message);
+    } finally {
+      setPayLoading(false);
     }
   };
 
@@ -629,9 +633,15 @@ function ResidentBilling() {
                   </button>
                   <button
                     onClick={handlePay}
-                    className="h-10 px-5 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition flex items-center gap-2"
+                    disabled={payLoading}
+                    className="h-10 px-5 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <CreditCard className="h-4 w-4" /> Pay ₹{payModal.amount.toLocaleString()}
+                    {payLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-4 w-4" />
+                    )}
+                    {payLoading ? "Processing..." : `Pay ₹${payModal.amount.toLocaleString()}`}
                   </button>
                 </div>
               </>

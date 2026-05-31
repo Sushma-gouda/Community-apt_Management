@@ -15,7 +15,8 @@ import {
   fetchBlocks,
   fetchVacantFlatsByBlock,
   registerResidentRpc,
-  updateFlat,
+  checkPreRegisteredResident,
+  claimResidentProfile,
   type BlockRow,
   type FlatRow,
 } from "@/services/supabase/community";
@@ -91,16 +92,16 @@ function SignUp() {
   const [blocksLoading, setBlocksLoading] = useState(true);
   const [flatsLoading, setFlatsLoading] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [isPreRegistered, setIsPreRegistered] = useState(false);
+  const [preRegisteredInfo, setPreRegisteredInfo] = useState<any>(null);
+  const [checkingEmail, setCheckingEmail] = useState(false);
   const navigate = useNavigate();
   const { user, profile, initialized } = useAuth();
 
   const [blocks, setBlocks] = useState<BlockRow[]>([]);
   const [flatsList, setFlatsList] = useState<FlatRow[]>([]);
 
-  if (initialized && user) {
-    const dest = dashboardPathForRole(profile?.role || "resident");
-    return <Navigate to={dest} />;
-  }
+
 
   useEffect(() => {
     fetchBlocks()
@@ -133,6 +134,60 @@ function SignUp() {
       setFlatId("");
     }
   }, [blockId]);
+
+  // Check if the resident is pre-registered when the email changes
+  useEffect(() => {
+    if (role !== "resident") {
+      setIsPreRegistered(false);
+      setPreRegisteredInfo(null);
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const cleanEmail = email.trim();
+
+    if (emailRegex.test(cleanEmail)) {
+      setCheckingEmail(true);
+      checkPreRegisteredResident(cleanEmail)
+        .then((info) => {
+          if (info && info.found) {
+            console.log("[SignUp] Found pre-registered resident:", info);
+            setIsPreRegistered(true);
+            setPreRegisteredInfo(info);
+            // Autofill fields
+            setFullName(info.name);
+            setPhone(info.phone || "");
+            setBlockId(info.block_id);
+            setFlatsList([{
+              id: info.flat_id,
+              block_id: info.block_id,
+              flat_number: info.flat_number,
+              floor: null,
+              sqft: null,
+              type: null,
+              status: "occupied"
+            }]);
+            setFlatId(info.flat_id);
+            setFamilyCount(String(info.family_count));
+          } else {
+            setIsPreRegistered(false);
+            setPreRegisteredInfo(null);
+          }
+        })
+        .catch((err) => {
+          console.error("Error checking pre-registration:", err);
+        })
+        .finally(() => setCheckingEmail(false));
+    } else {
+      setIsPreRegistered(false);
+      setPreRegisteredInfo(null);
+    }
+  }, [email, role]);
+
+  if (initialized && user) {
+    const dest = dashboardPathForRole(profile?.role || "resident");
+    return <Navigate to={dest} />;
+  }
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,6 +249,7 @@ function SignUp() {
               phone: phone.trim(),
               block_id: blockId,
               flat_number: flatNumber,
+              flat_id: flatId,
               family_count: familyCount,
             }
           : {
@@ -231,6 +287,7 @@ function SignUp() {
         const fullNameForProfile =
           role === "resident" ? fullName.trim() : email.split("@")[0]?.trim() || "User";
 
+        // Upsert profile — includes flat_id so profile is fully linked
         const { error: profileErr } = await supabase.from("profiles").upsert(
           {
             id: data.user.id,
@@ -239,6 +296,7 @@ function SignUp() {
             phone: role === "resident" ? phone.trim() : null,
             block_id: role === "resident" ? blockId : null,
             flat_number: role === "resident" ? flatNumber : null,
+            flat_id: role === "resident" ? flatId : null,
             family_count: role === "resident" ? Number.parseInt(familyCount, 10) || null : null,
             updated_at: new Date().toISOString(),
           },
@@ -249,25 +307,53 @@ function SignUp() {
           console.error("[Supabase] profile upsert:", profileErr.message);
         }
 
-        const dest = await getPostAuthRedirectPath(data.user);
-
         if (role === "resident") {
-          const { error: regErr } = await registerResidentRpc({
-            flatId: flatId,
-            fullName: fullName.trim(),
-            email: email.trim(),
-            phone: phone.trim(),
-            familyCount: Number.parseInt(familyCount, 10),
-          });
-          if (regErr) {
-            console.error("[Supabase] registerResidentRpc error:", regErr);
+          if (isPreRegistered) {
+            console.log("[SignUp] Linking to pre-registered profile via claimResidentProfile...");
+            const { error: claimErr } = await claimResidentProfile(email.trim());
+            if (claimErr) {
+              console.error("[Supabase] claimResidentProfile error:", claimErr);
+              setError(
+                `Account created but profile mapping failed: ${claimErr}. ` +
+                "Please sign in and contact admin to complete setup.",
+              );
+              return;
+            }
           } else {
-            await updateFlat(flatId, { status: "occupied" }).catch(console.error);
+            // Register resident via RPC:
+            //  • inserts into `residents` table with correct `name` column
+            //  • marks flat as `occupied`
+            //  • links resident to their profile
+            const { error: regErr } = await registerResidentRpc({
+              flatId: flatId,
+              fullName: fullName.trim(),
+              email: email.trim(),
+              phone: phone.trim(),
+              familyCount: Number.parseInt(familyCount, 10),
+            });
+
+            if (regErr) {
+              // Don't navigate — show the error so the user knows their account
+              // was created but the flat assignment failed (e.g., flat was just taken)
+              console.error("[Supabase] registerResidentRpc error:", regErr);
+              if (regErr.includes("already exists")) {
+                // Resident row already created (e.g. trigger ran first) — safe to proceed
+                console.log("[Supabase] Resident already registered, proceeding.");
+              } else {
+                setError(
+                  `Account created but flat assignment failed: ${regErr}. ` +
+                  "Please sign in and contact admin to complete setup.",
+                );
+                return;
+              }
+            }
           }
         }
 
+        const dest = await getPostAuthRedirectPath(data.user);
         navigate({ to: dest });
       }
+
     } finally {
       setLoading(false);
     }
@@ -299,6 +385,11 @@ function SignUp() {
         )}
         {role === "resident" && (
           <>
+            {isPreRegistered && (
+              <div className="rounded-lg border border-[color:var(--success)]/30 bg-[color:var(--success)]/10 px-4 py-3 text-sm text-[color:var(--success)] mb-2 animate-fade-up">
+                <span className="font-semibold">Welcome back, {fullName}!</span> We found your pre-registered profile for <strong>Flat {preRegisteredInfo?.flat_number}</strong> in <strong>{preRegisteredInfo?.block_name}</strong>. Choose a password to activate your account.
+              </div>
+            )}
             <Field
               label="Full name"
               name="full_name"
@@ -310,12 +401,12 @@ function SignUp() {
                 setFullName(ev.target.value);
                 setValidationErrors({ ...validationErrors, fullName: "" });
               }}
-              disabled={loading}
+              disabled={loading || isPreRegistered}
               error={validationErrors.fullName}
             />
             <div className="grid grid-cols-2 gap-3">
               <Field
-                label="Email"
+                label={checkingEmail ? "Email (Checking...)" : "Email"}
                 type="email"
                 name="email"
                 id="signup-email"
@@ -341,7 +432,7 @@ function SignUp() {
                   setPhone(ev.target.value);
                   setValidationErrors({ ...validationErrors, phone: "" });
                 }}
-                disabled={loading}
+                disabled={loading || isPreRegistered}
                 error={validationErrors.phone}
               />
             </div>
@@ -356,7 +447,7 @@ function SignUp() {
                   setBlockId(value);
                   setValidationErrors({ ...validationErrors, blockId: "" });
                 }}
-                disabled={loading || blocksLoading}
+                disabled={loading || blocksLoading || isPreRegistered}
                 error={validationErrors.blockId}
               />
               <Select
@@ -369,11 +460,11 @@ function SignUp() {
                   setFlatId(value);
                   setValidationErrors({ ...validationErrors, flatId: "" });
                 }}
-                disabled={loading || !blockId || flatsLoading}
+                disabled={loading || !blockId || flatsLoading || isPreRegistered}
                 error={validationErrors.flatId}
               />
             </div>
-            {blockId && flatsList.length === 0 && !flatsLoading && (
+            {blockId && flatsList.length === 0 && !flatsLoading && !isPreRegistered && (
               <div className="p-3 rounded-lg bg-warning/10 border border-warning/30 text-sm text-warning">
                 No vacant flats available in this block. Please select another block.
               </div>
@@ -395,7 +486,7 @@ function SignUp() {
                 setFamilyCount(ev.target.value);
                 setValidationErrors({ ...validationErrors, familyCount: "" });
               }}
-              disabled={loading}
+              disabled={loading || isPreRegistered}
               error={validationErrors.familyCount}
             />
             <PasswordField

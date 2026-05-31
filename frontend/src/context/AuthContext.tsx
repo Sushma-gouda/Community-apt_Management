@@ -93,7 +93,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(row);
 
     if (row.role === "resident") {
-      const home = await fetchResidentByUserId(u.id);
+      let home = await fetchResidentByUserId(u.id);
+      if (!home && row.flat_id) {
+        console.log("[AuthContext] Self-healing mapping: resident row missing, creating...");
+        try {
+          const email = u.email || "";
+          const { checkPreRegisteredResident, claimResidentProfile, registerResidentRpc } = await import("@/services/supabase/community");
+          const preReg = await checkPreRegisteredResident(email);
+          if (preReg && preReg.found) {
+            await claimResidentProfile(email);
+          } else {
+            await registerResidentRpc({
+              flatId: row.flat_id,
+              fullName: row.full_name || email.split("@")[0] || "Resident",
+              email: email,
+              phone: row.phone || "",
+              familyCount: row.family_count || 1
+            });
+          }
+          home = await fetchResidentByUserId(u.id);
+        } catch (err) {
+          console.error("[AuthContext] Self-healing mapping error:", err);
+        }
+      }
       setResidentHome(home);
     } else {
       setResidentHome(null);
