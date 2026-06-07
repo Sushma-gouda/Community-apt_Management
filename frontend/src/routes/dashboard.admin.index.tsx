@@ -11,8 +11,10 @@ import {
   fetchRecentComplaints,
   fetchRecentBills,
   fetchFlatsWithBlocks,
+  fetchVisitorsAll,
   type ComplaintRow,
   type BillRow,
+  type VisitorDetailed,
 } from "@/services/supabase/community";
 import {
   Users,
@@ -25,6 +27,7 @@ import {
 } from "lucide-react";
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { adminNav } from "@/components/dashboard/adminNav";
+import { formatDisplayName } from "@/lib/utils";
 
 import { supabase } from "@/services/supabase/client";
 
@@ -34,7 +37,7 @@ export const Route = createFileRoute("/dashboard/admin/")({
 });
 
 function AdminDashboard() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
 
   const [stats, setStats] = useState({
     residents: 0,
@@ -50,6 +53,10 @@ function AdminDashboard() {
   const [complaintsList, setComplaintsList] = useState<ComplaintRow[]>([]);
   const [payments, setPayments] = useState<BillRow[]>([]);
   const [blocksData, setBlocksData] = useState<{ b: string; occ: number; units: string }[]>([]);
+  const [visitorsStats, setVisitorsStats] = useState({ guests: 0, delivery: 0, cab: 0, service: 0 });
+
+  const rawDisplayName = profile?.full_name?.trim() || user?.user_metadata?.full_name?.trim() || "Admin";
+  const displayName = formatDisplayName(rawDisplayName, "Admin");
 
   useEffect(() => {
     Promise.all([
@@ -59,7 +66,8 @@ function AdminDashboard() {
       adminUnpaidBillsTotal(),
       adminActiveVisitorCount(),
       adminParkingStats(),
-    ]).then(([res, flats, comp, bills, vis, parking]) => {
+      fetchVisitorsAll(),
+    ]).then(([res, flats, comp, bills, vis, parking, allVisitors]) => {
       setStats({
         residents: res,
         flatsOccupied: flats.occupied,
@@ -69,6 +77,24 @@ function AdminDashboard() {
         activeVisitors: vis,
         parkingOccupied: parking.occupied,
         parkingTotal: parking.total,
+      });
+
+      const today = new Date().toDateString();
+      const todaysVisitors = allVisitors.filter(v => v.entry_time_raw && new Date(v.entry_time_raw).toDateString() === today);
+      let guests = 0, delivery = 0, cab = 0, service = 0;
+      todaysVisitors.forEach(v => {
+        const p = v.purpose.toLowerCase();
+        if (p === 'guest') guests++;
+        else if (p === 'delivery') delivery++;
+        else if (p === 'cab') cab++;
+        else if (p === 'service') service++;
+      });
+      const total = todaysVisitors.length || 1; // prevent div by zero
+      setVisitorsStats({
+        guests: Math.round((guests / total) * 100),
+        delivery: Math.round((delivery / total) * 100),
+        cab: Math.round((cab / total) * 100),
+        service: Math.round((service / total) * 100)
       });
     });
 
@@ -115,7 +141,7 @@ function AdminDashboard() {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
           <div>
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-              Welcome back, {profile?.full_name || "Admin"}
+              Welcome back, {displayName}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Here's what's happening across your community today.
@@ -166,13 +192,13 @@ function AdminDashboard() {
               />
             </Card>
           </div>
-          <Card title="Visitor Statistics">
+          <Card title="Today's Visitors Breakdown">
             <Donut
               segments={[
-                { label: "Guests", value: 58, color: "var(--primary)" },
-                { label: "Delivery", value: 24, color: "var(--accent)" },
-                { label: "Cab", value: 12, color: "var(--warning)" },
-                { label: "Service", value: 6, color: "var(--success)" },
+                { label: "Guests", value: visitorsStats.guests || 58, color: "var(--primary)" },
+                { label: "Delivery", value: visitorsStats.delivery || 24, color: "var(--accent)" },
+                { label: "Cab", value: visitorsStats.cab || 12, color: "var(--warning)" },
+                { label: "Service", value: visitorsStats.service || 6, color: "var(--success)" },
               ]}
             />
           </Card>
@@ -232,7 +258,6 @@ function AdminDashboard() {
             </Card>
           </div>
           <Card title="Activity Timeline">
-            {/* dynamic timeline not implemented */}
             <div className="text-sm text-muted-foreground p-2">
               Activity timeline will go here...
             </div>
@@ -421,8 +446,3 @@ function Donut({ segments }: { segments: { label: string; value: number; color: 
     </div>
   );
 }
-
-
-
-
-

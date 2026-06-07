@@ -1,9 +1,10 @@
 import { Link, useRouterState, useNavigate, Navigate } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Bell, Building2, ChevronDown, LogOut, Menu, Moon, Search, Sun, X } from "lucide-react";
+import { Bell, Building2, ChevronDown, LogOut, Menu, Moon, Search, Sun, X, CheckCircle, UserCheck, XCircle, ShieldCheck, CreditCard, Wrench, ClipboardList, Info } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
-import { cn } from "@/lib/utils";
+import { cn, formatDisplayName } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { useNotifications } from "@/context/NotificationContext";
 import { signOut as supabaseSignOut } from "@/services/supabase/client";
 
 export type NavItem = {
@@ -27,12 +28,15 @@ export function DashboardLayout({
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const { notifications, unreadCount, markAsRead, markAllRead, clearReadNotifications } = useNotifications();
 
-  const displayName =
-    profile?.full_name?.trim() || user?.email?.split("@")[0]?.trim() || `${role} User`;
+  const rawDisplayName =
+    profile?.full_name?.trim() || user?.user_metadata?.full_name?.trim() || user?.email?.split("@")[0]?.trim() || `${role} User`;
+  const displayName = formatDisplayName(rawDisplayName, `${role} User`);
   const userEmail = user?.email ?? `${role.toLowerCase()}@communa.app`;
   const initials = (() => {
-    const base = (profile?.full_name?.trim() || user?.email?.split("@")[0] || role).toUpperCase();
+    const base = displayName.toUpperCase();
     const letters = base.replace(/[^A-Z0-9]/gi, "");
     if (letters.length >= 2) return letters.slice(0, 2);
     if (letters.length === 1) return (letters + letters).slice(0, 2);
@@ -192,15 +196,168 @@ export function DashboardLayout({
               </button>
 
               {/* Notifications */}
-              <button className="relative grid place-items-center h-9 w-9 rounded-lg hover:bg-foreground/5 text-foreground/80">
-                <Bell className="h-4 w-4" />
-                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive" />
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setNotificationsOpen(!notificationsOpen);
+                    setProfileOpen(false);
+                  }}
+                  className="relative grid place-items-center h-9 w-9 rounded-lg hover:bg-foreground/5 text-foreground/80"
+                  aria-label="Notifications"
+                >
+                  <Bell className="h-4 w-4" />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1.5 right-1.5 flex h-3 w-3 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-white">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                {notificationsOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setNotificationsOpen(false)} />
+                    <div className="absolute right-0 top-full mt-2 w-96 rounded-2xl glass-strong shadow-elegant z-20 overflow-hidden animate-scale-in border border-border/50">
+                      {/* Header */}
+                      <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between bg-[image:var(--gradient-primary)] text-white">
+                        <div className="flex items-center gap-2">
+                          <Bell className="h-4 w-4" />
+                          <span className="font-semibold text-sm">Notifications</span>
+                          {unreadCount > 0 && (
+                            <span className="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-white/20 text-[11px] font-bold px-1.5">
+                              {unreadCount}
+                            </span>
+                          )}
+                        </div>
+                        {unreadCount > 0 && (
+                          <button
+                            onClick={() => markAllRead()}
+                            className="text-xs text-white/80 hover:text-white font-medium flex items-center gap-1 transition"
+                          >
+                            <CheckCircle className="h-3.5 w-3.5" /> Mark all read
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Notification list */}
+                      <div className="max-h-[420px] overflow-y-auto divide-y divide-border/40">
+                        {notifications.length === 0 ? (
+                          <div className="py-12 flex flex-col items-center gap-3 text-center px-6">
+                            <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center">
+                              <Bell className="h-6 w-6 text-primary/50" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-foreground/70">All caught up!</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">No notifications yet.</p>
+                            </div>
+                          </div>
+                        ) : (
+                          notifications.map((n) => {
+                            const getIcon = () => {
+                              switch (n.type) {
+                                case "visitor_request": return { icon: UserCheck, color: "text-blue-500", bg: "bg-blue-500/10" };
+                                case "visitor_approved": return { icon: CheckCircle, color: "text-green-500", bg: "bg-green-500/10" };
+                                case "visitor_rejected": return { icon: XCircle, color: "text-red-500", bg: "bg-red-500/10" };
+                                case "visitor_checked_in": return { icon: ShieldCheck, color: "text-violet-500", bg: "bg-violet-500/10" };
+                                case "visitor_checked_out": return { icon: LogOut, color: "text-orange-500", bg: "bg-orange-500/10" };
+                                case "bill_generated": return { icon: CreditCard, color: "text-amber-500", bg: "bg-amber-500/10" };
+                                case "bill_paid": return { icon: CheckCircle, color: "text-green-500", bg: "bg-green-500/10" };
+                                case "complaint": return { icon: ClipboardList, color: "text-rose-500", bg: "bg-rose-500/10" };
+                                case "maintenance": return { icon: Wrench, color: "text-cyan-500", bg: "bg-cyan-500/10" };
+                                default: return { icon: Info, color: "text-primary", bg: "bg-primary/10" };
+                              }
+                            };
+                            const { icon: Icon, color, bg } = getIcon();
+                            const timeStr = new Date(n.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+                            return (
+                              <div
+                                key={n.id}
+                                className={cn(
+                                  "flex items-start gap-3.5 px-5 py-4 transition-colors hover:bg-foreground/[0.04] group",
+                                  !n.read ? "bg-primary/[0.04]" : "bg-transparent"
+                                )}
+                              >
+                                {/* Icon bubble — click marks as read */}
+                                <button
+                                  onClick={() => { if (!n.read) markAsRead(n.id); }}
+                                  className={cn("mt-0.5 h-9 w-9 rounded-xl flex-shrink-0 flex items-center justify-center transition-transform group-hover:scale-110 focus:outline-none", bg)}
+                                  title={n.read ? "Already read" : "Mark as read"}
+                                >
+                                  <Icon className={cn("h-4 w-4", color)} />
+                                </button>
+
+                                {/* Content — click navigates */}
+                                <div
+                                  className="flex-1 min-w-0 cursor-pointer"
+                                  onClick={() => {
+                                    if (!n.read) markAsRead(n.id);
+                                    if (n.related_module) {
+                                      setNotificationsOpen(false);
+                                      const targetModule = n.related_module.toLowerCase();
+                                      let targetPath = `/dashboard/${role.toLowerCase()}/${targetModule}`;
+                                      if (role === "Resident" && targetModule === "visitors") targetPath = `/dashboard/resident`;
+                                      else if (role === "Security" && targetModule === "visitors") targetPath = `/dashboard/security/active-visitors`;
+                                      navigate({ to: targetPath as any });
+                                    }
+                                  }}
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className={cn("text-sm leading-snug", !n.read ? "font-semibold text-foreground" : "font-medium text-foreground/80")}>
+                                      {n.title}
+                                    </p>
+                                    {!n.read && (
+                                      <span className="mt-1 h-2 w-2 rounded-full bg-primary flex-shrink-0 shadow-[0_0_6px_2px] shadow-primary/40" />
+                                    )}
+                                  </div>
+                                  {n.message && (
+                                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
+                                  )}
+                                  <div className="flex items-center justify-between mt-1.5">
+                                    <p className="text-[10px] text-muted-foreground/60">{timeStr}</p>
+                                    {n.related_module && (
+                                      <span className="text-[9px] uppercase tracking-wider bg-foreground/[0.06] px-1.5 py-0.5 rounded-full text-muted-foreground font-medium">
+                                        {n.related_module}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+
+                      {/* Footer */}
+                      {notifications.length > 0 && (
+                        <div className="px-5 py-3 border-t border-border/60 bg-foreground/[0.02] flex items-center justify-between gap-2">
+                          <p className="text-[11px] text-muted-foreground">
+                            {notifications.length} notification{notifications.length !== 1 ? "s" : ""}
+                            {unreadCount > 0 && (
+                              <span className="text-primary font-medium"> &middot; {unreadCount} unread</span>
+                            )}
+                          </p>
+                          {notifications.some(n => n.read) && (
+                            <button
+                              onClick={() => clearReadNotifications()}
+                              className="text-[11px] text-destructive/70 hover:text-destructive font-medium transition flex items-center gap-1"
+                            >
+                              <X className="h-3 w-3" /> Clear read
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
               {/* Profile dropdown */}
               <div className="relative">
                 <button
-                  onClick={() => setProfileOpen((v) => !v)}
+                  onClick={() => {
+                    setProfileOpen((v) => !v);
+                    setNotificationsOpen(false);
+                  }}
                   className="hidden sm:flex items-center gap-2 h-9 pl-1.5 pr-3 rounded-lg hover:bg-foreground/5"
                 >
                   <div className="h-6 w-6 rounded-full bg-[image:var(--gradient-primary)] grid place-items-center text-white text-[11px] font-semibold">

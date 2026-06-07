@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+﻿import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { type LucideIcon, User, Bell, Palette, Lock, Shield, Mail, CheckCircle, AlertCircle } from "lucide-react";
 import { Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
@@ -155,12 +155,12 @@ function SettingsPage() {
                 <p className="text-sm text-muted-foreground mb-4">Configure which notifications you receive. Changes are saved locally.</p>
                 <div className="space-y-2">
                   {[
-                    { id: "pref_admin_complaints", i: Bell, l: "New Complaints", d: "Get notified when residents file a complaint" },
-                    { id: "pref_admin_email", i: Mail, l: "Email Digest", d: "Receive daily summary by email" },
-                    { id: "pref_admin_security", i: Shield, l: "Security Alerts", d: "Visitor / gate anomalies" },
-                    { id: "pref_admin_payments", i: Bell, l: "Payment Reminders", d: "Notify when bills go overdue" },
+                    { i: Bell, l: "New Complaints", d: "Get notified when residents file a complaint" },
+                    { i: Mail, l: "Email Digest", d: "Receive daily summary by email" },
+                    { i: Shield, l: "Security Alerts", d: "Visitor / gate anomalies" },
+                    { i: Bell, l: "Payment Reminders", d: "Notify when bills go overdue" },
                   ].map((n, i) => (
-                    <Toggle key={i} id={n.id} icon={n.i} label={n.l} desc={n.d} defaultOn={i !== 1} />
+                    <Toggle key={i} icon={n.i} label={n.l} desc={n.d} defaultOn={i !== 1} />
                   ))}
                 </div>
               </Card>
@@ -201,8 +201,8 @@ function SettingsPage() {
                   </Field>
                 </div>
                 <div className="mt-5 space-y-2">
-                  <Toggle id="pref_admin_2fa" icon={Shield} label="Two-factor authentication" desc="Add an extra security layer" defaultOn />
-                  <Toggle id="pref_admin_login_alerts" icon={Lock} label="Login alerts" desc="Email when a new device signs in" defaultOn />
+                  <Toggle icon={Shield} label="Two-factor authentication" desc="Add an extra security layer" defaultOn />
+                  <Toggle icon={Lock} label="Login alerts" desc="Email when a new device signs in" defaultOn />
                 </div>
                 <div className="mt-5 flex items-center justify-end">
                   <PrimaryButton onClick={handleChangePassword} disabled={pwdSaving}>{pwdSaving ? "Updating..." : "Update Password"}</PrimaryButton>
@@ -217,17 +217,8 @@ function SettingsPage() {
   );
 }
 
-function Toggle({ id, icon: Icon, label, desc, defaultOn }: { id: string; icon: LucideIcon; label: string; desc: string; defaultOn?: boolean }) {
-  const [on, setOn] = useState(() => {
-    const saved = localStorage.getItem(id);
-    if (saved !== null) return saved === "true";
-    return !!defaultOn;
-  });
-
-  useEffect(() => {
-    localStorage.setItem(id, on.toString());
-  }, [on, id]);
-
+function Toggle({ icon: Icon, label, desc, defaultOn }: { icon: LucideIcon; label: string; desc: string; defaultOn?: boolean }) {
+  const [on, setOn] = useState(!!defaultOn);
   return (
     <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-foreground/[0.03]">
       <span className="grid place-items-center h-9 w-9 rounded-lg bg-primary/10 text-primary">

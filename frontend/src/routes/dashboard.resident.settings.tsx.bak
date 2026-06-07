@@ -1,0 +1,237 @@
+﻿import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState, useEffect } from "react";
+import { User, Bell, Palette, Lock, Shield, CheckCircle, AlertCircle, ArrowRight } from "lucide-react";
+import { Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
+import { residentNav } from "@/components/dashboard/residentNav";
+import { PageHeader } from "@/components/dashboard/PageHeader";
+import { useTheme } from "@/hooks/use-theme";
+import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/services/supabase/client";
+
+export const Route = createFileRoute("/dashboard/resident/settings")({
+  head: () => ({ meta: [{ title: "Settings - Communa Resident" }] }),
+  component: ResidentSettings,
+});
+
+function Toast({ message, type }: { message: string; type: "success" | "error" }) {
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-elegant text-white text-sm font-medium animate-scale-in ${type === "success" ? "bg-green-600" : "bg-destructive"}`}>
+      {type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+      {message}
+    </div>
+  );
+}
+
+function ResidentSettings() {
+  const { theme, toggle } = useTheme();
+  const { user, profile, residentHome } = useAuth();
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<"account" | "notifications" | "security" | "appearance">("account");
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  // Password form
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [pwdSaving, setPwdSaving] = useState(false);
+
+  const showToast = (message: string, type: "success" | "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const handleChangePassword = async () => {
+    if (!newPwd || !confirmPwd) return showToast("Please fill in all password fields.", "error");
+    if (newPwd !== confirmPwd) return showToast("New passwords do not match.", "error");
+    if (newPwd.length < 6) return showToast("Password must be at least 6 characters.", "error");
+    setPwdSaving(true);
+    const { error } = await supabase.auth.updateUser({ password: newPwd });
+    setPwdSaving(false);
+    if (error) {
+      showToast("Password update failed: " + error.message, "error");
+    } else {
+      setNewPwd(""); setConfirmPwd("");
+      showToast("Password updated successfully!", "success");
+    }
+  };
+
+  const resident = residentHome?.resident;
+  const flat = residentHome?.flat;
+  const block = residentHome?.block;
+
+  const displayName = resident?.full_name || resident?.name || profile?.full_name || user?.email?.split("@")[0] || "Resident";
+  const email = user?.email || resident?.email || "—";
+  const phone = resident?.phone || profile?.phone || "—";
+  const flatLabel = flat ? `${flat.flat_number} · Block ${block?.name || "—"}` : "—";
+  const residentSince = resident?.created_at
+    ? new Date(resident.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+    : "—";
+  const residentId = resident?.id ? `RES-${resident.id.slice(-4).toUpperCase()}` : "—";
+
+  const tabs = [
+    { id: "account", label: "Account", icon: User },
+    { id: "notifications", label: "Notifications", icon: Bell },
+    { id: "security", label: "Security", icon: Lock },
+    { id: "appearance", label: "Appearance", icon: Palette },
+  ] as const;
+
+  return (
+    <DashboardLayout role="Resident" items={residentNav}>
+      <div className="space-y-6 animate-fade-up">
+        <PageHeader title="Settings" subtitle="Manage your account preferences." />
+
+        <div className="grid lg:grid-cols-[220px_1fr] gap-4">
+          {/* Sidebar */}
+          <nav className="rounded-2xl glass shadow-card p-2 h-fit">
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
+                  tab === t.id ? "bg-[image:var(--gradient-primary)] text-white shadow-elegant" : "text-foreground/75 hover:bg-foreground/5"
+                }`}
+              >
+                <t.icon className="h-4 w-4" /> {t.label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Content */}
+          <div className="space-y-4">
+            {/* --- ACCOUNT TAB --- */}
+            {tab === "account" && (
+              <Card title="Account Information">
+                <div className="space-y-1 mb-4">
+                  {[
+                    { label: "Full Name", value: displayName },
+                    { label: "Email Address", value: email },
+                    { label: "Phone Number", value: phone },
+                    { label: "Flat", value: flatLabel },
+                    { label: "Resident Since", value: residentSince },
+                    { label: "Resident ID", value: residentId },
+                  ].map((d) => (
+                    <div
+                      key={d.label}
+                      className="flex items-center justify-between text-sm p-3 rounded-xl hover:bg-foreground/5 transition"
+                    >
+                      <span className="text-muted-foreground">{d.label}</span>
+                      <span className="font-medium text-right">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-3 border-t border-border flex justify-end">
+                  <button
+                    onClick={() => navigate({ to: "/dashboard/resident/profile" })}
+                    className="inline-flex items-center gap-2 h-10 px-5 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition"
+                  >
+                    Edit Profile <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </Card>
+            )}
+
+            {/* --- NOTIFICATIONS TAB --- */}
+            {tab === "notifications" && (
+              <Card title="Notification Preferences">
+                <p className="text-sm text-muted-foreground mb-4">Configure which notifications you receive.</p>
+                <div className="space-y-2">
+                  {[
+                    { label: "New Notices", desc: "Get notified about community announcements", defaultOn: true },
+                    { label: "Bill Reminders", desc: "Reminders for upcoming bill payments", defaultOn: true },
+                    { label: "Complaint Updates", desc: "Status updates on your complaints", defaultOn: true },
+                    { label: "Visitor Alerts", desc: "Notifications when visitors arrive", defaultOn: true },
+                    { label: "Email Digest", desc: "Weekly summary via email", defaultOn: false },
+                  ].map((n) => (
+                    <Toggle key={n.label} label={n.label} desc={n.desc} defaultOn={n.defaultOn} />
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* --- SECURITY TAB --- */}
+            {tab === "security" && (
+              <Card title="Security Settings">
+                <p className="text-sm text-muted-foreground mb-4">Set a new password for your account.</p>
+                <div className="space-y-3">
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted-foreground">New Password</span>
+                    <input
+                      type="password"
+                      value={newPwd}
+                      onChange={(e) => setNewPwd(e.target.value)}
+                      placeholder="Min. 6 characters"
+                      className="mt-1.5 w-full h-10 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-2 focus:ring-ring transition"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-muted-foreground">Confirm New Password</span>
+                    <input
+                      type="password"
+                      value={confirmPwd}
+                      onChange={(e) => setConfirmPwd(e.target.value)}
+                      placeholder="Repeat new password"
+                      className="mt-1.5 w-full h-10 px-3 text-sm rounded-lg bg-foreground/5 border border-transparent focus:bg-background focus:border-input focus:outline-none focus:ring-2 focus:ring-ring transition"
+                    />
+                  </label>
+                  <div className="pt-2">
+                    <Toggle label="Two-factor authentication" desc="Add an extra layer of security" defaultOn={false} />
+                  </div>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={handleChangePassword}
+                      disabled={pwdSaving}
+                      className="h-10 px-5 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition disabled:opacity-60"
+                    >
+                      {pwdSaving ? "Updating..." : "Update Password"}
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {/* --- APPEARANCE TAB --- */}
+            {tab === "appearance" && (
+              <Card title="Appearance">
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {(["light", "dark"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => { if (t !== theme) toggle(); }}
+                      className={`text-left rounded-2xl p-4 border-2 transition ${
+                        theme === t ? "border-primary shadow-elegant" : "border-transparent glass hover:border-border"
+                      }`}
+                    >
+                      <div className={`h-24 rounded-xl mb-3 ${t === "dark" ? "bg-[oklch(0.14_0.025_260)]" : "bg-[oklch(0.985_0.005_240)] border border-border"}`} />
+                      <div className="text-sm font-semibold capitalize">{t} mode</div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        {t === "dark" ? "Easier on the eyes at night" : "Bright and clean for daytime"}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+      {toast && <Toast message={toast.message} type={toast.type} />}
+    </DashboardLayout>
+  );
+}
+
+function Toggle({ label, desc, defaultOn }: { label: string; desc: string; defaultOn?: boolean }) {
+  const [on, setOn] = useState(!!defaultOn);
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-foreground/[0.03]">
+      <div className="flex-1">
+        <div className="text-sm font-medium">{label}</div>
+        <div className="text-[11px] text-muted-foreground">{desc}</div>
+      </div>
+      <button
+        onClick={() => setOn(!on)}
+        className={`relative h-6 w-11 rounded-full transition ${on ? "bg-[image:var(--gradient-primary)]" : "bg-foreground/15"}`}
+      >
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${on ? "left-[22px]" : "left-0.5"}`} />
+      </button>
+    </div>
+  );
+}

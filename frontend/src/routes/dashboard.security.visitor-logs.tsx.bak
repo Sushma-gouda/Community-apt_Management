@@ -1,15 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+﻿import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { fetchVisitorsAll, type VisitorDetailed } from "@/services/supabase/community";
 import { Search, Download, Filter } from "lucide-react";
 import { Badge, Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { securityNav } from "@/components/dashboard/securityNav";
 import { PageHeader } from "@/components/dashboard/PageHeader";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
 export const Route = createFileRoute("/dashboard/security/visitor-logs")({
-  head: () => ({ meta: [{ title: "Visitor Logs - Communa Security" }] }),
+  head: () => ({ meta: [{ title: "Visitor Logs — Communa Security" }] }),
   component: VisitorLogs,
 });
 
@@ -27,76 +25,13 @@ function VisitorLogs() {
     const matchSearch =
       v.name.toLowerCase().includes(s) ||
       v.flat.toLowerCase().includes(s) ||
-      (v.vehicle?.toLowerCase().includes(s) ?? false) ||
+      v.vehicle?.toLowerCase().includes(s) ||
       v.purpose.toLowerCase().includes(s);
+
     const matchStatus = statusFilter === "All" || v.status === statusFilter.toLowerCase().replace(" ", "_");
+    
     return matchSearch && matchStatus;
   });
-
-  const handleExportPDF = () => {
-    const doc = new jsPDF({ orientation: "landscape" });
-    const now = new Date();
-
-    // Branded header - dark slate
-    doc.setFillColor(30, 35, 60);
-    doc.rect(0, 0, 297, 22, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text("Communa - Visitor Log Report", 14, 14);
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text("Generated: " + now.toLocaleString(), 297 - 14, 14, { align: "right" });
-
-    const rows = filtered.map((v) => [
-      v.date || "-",
-      v.name,
-      v.phone || "-",
-      v.flat || "-",
-      v.host || "-",
-      v.purpose,
-      v.status.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
-      v.checkIn || "-",
-      v.checkOut || "-",
-      v.vehicle || "-",
-    ]);
-
-    autoTable(doc, {
-      startY: 28,
-      head: [["Date", "Visitor Name", "Phone", "Flat", "Host", "Purpose", "Status", "Check In", "Check Out", "Vehicle"]],
-      body: rows,
-      headStyles: { fillColor: [30, 35, 60], textColor: 255, fontStyle: "bold", fontSize: 9 },
-      bodyStyles: { fontSize: 8, textColor: [40, 40, 40] },
-      alternateRowStyles: { fillColor: [247, 247, 252] },
-      columnStyles: { 6: { fontStyle: "bold" } },
-      styles: { cellPadding: 3 },
-      margin: { left: 14, right: 14 },
-    });
-
-    // Footer on every page
-    const pageCount = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFontSize(8);
-      doc.setTextColor(150);
-      doc.text(
-        "Page " + i + " of " + pageCount + "  |  Communa Community Management",
-        148.5,
-        205,
-        { align: "center" }
-      );
-    }
-
-    doc.save("visitor-log-" + now.toISOString().slice(0, 10) + ".pdf");
-  };
-
-  const statusTone = (status: string): "warning" | "accent" | "primary" | "danger" | "muted" => {
-    if (status === "pending") return "warning";
-    if (status === "approved") return "accent";
-    if (status === "checked_in") return "primary";
-    if (status === "rejected") return "danger";
-    return "muted";
-  };
 
   return (
     <DashboardLayout role="Security" items={securityNav}>
@@ -104,11 +39,8 @@ function VisitorLogs() {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <PageHeader title="Visitor Logs" subtitle="Complete history of all gate entries and exits." />
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleExportPDF}
-              className="inline-flex h-10 px-4 items-center rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-semibold gap-2 transition hover:opacity-90 shadow-elegant"
-            >
-              <Download className="h-4 w-4" /> Export PDF
+            <button className="inline-flex h-10 px-4 items-center rounded-lg bg-foreground/5 hover:bg-foreground/10 text-sm font-medium gap-2 transition">
+              <Download className="h-4 w-4" /> Export CSV
             </button>
           </div>
         </div>
@@ -164,7 +96,9 @@ function VisitorLogs() {
                     <td className="px-4 py-4 whitespace-nowrap">{v.date}</td>
                     <td className="px-4 py-4 font-medium">
                       {v.name}
-                      <div className="text-xs text-muted-foreground font-normal mt-0.5">{v.phone}</div>
+                      <div className="text-xs text-muted-foreground font-normal mt-0.5">
+                        {v.phone}
+                      </div>
                     </td>
                     <td className="px-4 py-4">
                       {v.flat}
@@ -172,18 +106,23 @@ function VisitorLogs() {
                     </td>
                     <td className="px-4 py-4 text-foreground/80">{v.purpose}</td>
                     <td className="px-4 py-4">
-                      <Badge tone={statusTone(v.status)}>
-                        {v.status.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
+                      <Badge tone={
+                        v.status === 'pending' ? 'warning' :
+                        v.status === 'approved' ? 'accent' :
+                        v.status === 'checked_in' ? 'primary' :
+                        v.status === 'rejected' ? 'danger' : 'muted'
+                      }>
+                        {v.status.replace('_', ' ').replace(/\\b\\w/g, l => l.toUpperCase())}
                       </Badge>
                     </td>
-                    <td className="px-4 py-4 text-foreground/80">{v.checkIn || "-"}</td>
-                    <td className="px-4 py-4 text-foreground/80">{v.checkOut || "-"}</td>
-                    <td className="px-4 py-4 text-foreground/80">{v.vehicle || "-"}</td>
+                    <td className="px-4 py-4 text-foreground/80">{v.checkIn || "—"}</td>
+                    <td className="px-4 py-4 text-foreground/80">{v.checkOut || "—"}</td>
+                    <td className="px-4 py-4 text-foreground/80">{v.vehicle || "—"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-
+            
             {filtered.length === 0 && (
               <div className="py-12 text-center text-muted-foreground">
                 No visitors found matching your filters.

@@ -1,16 +1,20 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/services/supabase/client";
 import {
   fetchComplaintsForResident,
   fetchBillsForResident,
   fetchResidentNotices,
   fetchResidentParking,
-  insertVisitor,
+  fetchVisitorsAll,
+  approveVisitorRequest,
+  rejectVisitorRequest,
   type ComplaintRow,
   type BillRow,
   type NoticeRow,
   type ParkingDetailed,
+  type VisitorDetailed,
 } from "@/services/supabase/community";
 import {
   Wallet,
@@ -23,6 +27,9 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
+  UserCheck,
+  XCircle,
+  KeyRound
 } from "lucide-react";
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { residentNav } from "@/components/dashboard/residentNav";
@@ -39,42 +46,67 @@ function ResidentDashboard() {
   const [bills, setBills] = useState<BillRow[]>([]);
   const [notices, setNotices] = useState<NoticeRow[]>([]);
   const [parking, setParking] = useState<ParkingDetailed | null>(null);
+  const [visitors, setVisitors] = useState<VisitorDetailed[]>([]);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
-  const [visitorName, setVisitorName] = useState("");
-  const [visitorPhone, setVisitorPhone] = useState("");
-
-  useEffect(() => {
+  const loadData = async () => {
     if (residentHome?.resident.id) {
       fetchComplaintsForResident(residentHome.resident.id).then(setComplaints);
-    }
-    if (residentHome?.resident.id) {
       fetchBillsForResident(residentHome.resident.id).then(setBills);
     }
-    // Use fetchResidentParking() which looks up by user_id → residents.flat_id → parking.flat_id
     fetchResidentParking().then((slots) => {
       if (slots.length > 0) setParking(slots[0] as any);
     });
     fetchResidentNotices(3).then(setNotices);
-  }, [residentHome]);
-
-  const handleVisitor = async () => {
-    if (!visitorName || !residentHome?.flat.id) return;
-    const { error } = await insertVisitor({
-      name: visitorName,
-      phone: visitorPhone,
-      flat_id: residentHome.flat.id,
-      purpose: "Guest",
+    
+    // Load visitors
+    fetchVisitorsAll().then(data => {
+      if (residentHome?.resident.id) {
+        setVisitors(data.filter(v => v.resident_id === residentHome.resident.id));
+      }
     });
-    if (error) {
-      alert("Error generating pass: " + error);
-    } else {
-      setVisitorName("");
-      setVisitorPhone("");
-      alert("Pass generated successfully");
-    }
   };
 
-  // `resident.name` is the actual DB column (not `full_name`)
+  useEffect(() => {
+    loadData();
+
+    if (residentHome?.resident.id) {
+      const channel = supabase
+        .channel('resident_dashboard_visitors')
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: 'visitors',
+          filter: `resident_id=eq.${residentHome.resident.id}`
+        }, () => {
+          // reload visitors
+          fetchVisitorsAll().then(data => {
+            setVisitors(data.filter(v => v.resident_id === residentHome.resident.id));
+          });
+        })
+        .subscribe();
+        
+      return () => {
+        supabase.removeChannel(channel);
+      }
+    }
+  }, [residentHome]);
+
+  const handleApprove = async (id: string) => {
+    if (!residentHome?.resident.user_id) return;
+    setLoadingAction(id);
+    const { error } = await approveVisitorRequest(id, residentHome.resident.user_id);
+    if (error) alert("Error approving visitor: " + error);
+    setLoadingAction(null);
+  };
+
+  const handleReject = async (id: string) => {
+    setLoadingAction(id);
+    const { error } = await rejectVisitorRequest(id);
+    if (error) alert("Error rejecting visitor: " + error);
+    setLoadingAction(null);
+  };
+
   const displayName = residentHome?.resident.name || profile?.full_name || "Resident";
   const flatDisplay = residentHome
     ? `Flat ${residentHome.flat.flat_number} · ${residentHome.block.name} · ${residentHome.resident.family_count ?? 1} family member(s)`
@@ -85,6 +117,10 @@ function ResidentDashboard() {
   const openComplaintsCount = complaints.filter(
     (c) => c.status === "open" || c.status === "in_progress",
   ).length;
+
+  const pendingVisitors = visitors.filter(v => v.status === 'pending');
+  const activeVisitors = visitors.filter(v => v.status === 'checked_in');
+  const approvedVisitors = visitors.filter(v => v.status === 'approved');
 
   return (
     <DashboardLayout role="Resident" items={residentNav}>
@@ -131,22 +167,87 @@ function ResidentDashboard() {
             tone="primary"
           />
           <StatCard
-            label="Trust Score"
-            value="98"
-            change="Top 5% resident"
-            icon={ShieldCheck}
-            tone="success"
+            label="Visitors Inside"
+            value={activeVisitors.length.toString()}
+            change="Currently visiting"
+            icon={UserCheck}
+            tone="accent"
           />
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Main Column */}
           <div className="lg:col-span-2 space-y-6">
+            
+            {/* Visitor Requests */}
+            <Card title="Visitor Requests" className="border-primary/20">
+              <div className="space-y-4">
+                {pendingVisitors.map(v => (
+                  <div key={v.id} className="p-4 rounded-xl bg-background border border-border shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-base">{v.name}</span>
+                        <Badge tone="warning">Waiting at Gate</Badge>
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {v.purpose} • {v.visitor_count} person(s)
+                        {v.vehicle && ` • Vehicle: ${v.vehicle}`}
+                      </div>
+                      <div className="text-xs text-muted-foreground/70 mt-1">
+                        Arrived: {v.checkIn || "Just now"}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => handleReject(v.id)}
+                        disabled={loadingAction === v.id}
+                        className="px-4 py-2 rounded-lg bg-destructive/10 text-destructive text-sm font-medium hover:bg-destructive/20 transition disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                      <button 
+                        onClick={() => handleApprove(v.id)}
+                        disabled={loadingAction === v.id}
+                        className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+                      >
+                        Approve
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                
+                {approvedVisitors.map(v => (
+                  <div key={v.id} className="p-4 rounded-xl bg-accent/5 border border-accent/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-base">{v.name}</span>
+                        <Badge tone="accent">Approved</Badge>
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        Waiting for security to verify OTP.
+                      </div>
+                    </div>
+                    <div className="text-center px-6 py-2 bg-background rounded-lg border border-border">
+                      <div className="text-[10px] uppercase font-bold text-muted-foreground mb-0.5">Entry OTP</div>
+                      <div className="text-2xl font-mono tracking-widest font-bold text-primary">{v.otp}</div>
+                    </div>
+                  </div>
+                ))}
+
+                {pendingVisitors.length === 0 && approvedVisitors.length === 0 && (
+                  <div className="py-6 text-center">
+                    <UserCheck className="h-10 w-10 text-muted-foreground/20 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">No pending visitor requests.</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+
             {/* Recent Notices */}
             <Card
               title="Recent Notices"
               action={
-                <Link to="/dashboard/resident" className="text-xs text-primary hover:underline">
+                <Link to="/dashboard/resident/notices" className="text-xs text-primary hover:underline">
                   View all
                 </Link>
               }
@@ -181,60 +282,28 @@ function ResidentDashboard() {
               </div>
             </Card>
 
-            {/* Quick Actions */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Card title="Quick Pass">
-                <p className="text-xs text-muted-foreground mb-4">
-                  Generate a temporary entry pass for your guests.
-                </p>
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    placeholder="Guest Name"
-                    value={visitorName}
-                    onChange={(e) => setVisitorName(e.target.value)}
-                    className="w-full h-9 px-3 rounded-lg bg-foreground/[0.03] border border-border text-sm"
-                  />
-                  <input
-                    type="tel"
-                    placeholder="Guest Phone"
-                    value={visitorPhone}
-                    onChange={(e) => setVisitorPhone(e.target.value)}
-                    className="w-full h-9 px-3 rounded-lg bg-foreground/[0.03] border border-border text-sm"
-                  />
-                  <button
-                    onClick={handleVisitor}
-                    className="w-full h-9 rounded-lg bg-[image:var(--gradient-primary)] text-white text-sm font-medium shadow-elegant hover:shadow-glow transition"
-                  >
-                    Generate Pass
-                  </button>
-                </div>
-              </Card>
-
-              <Card title="Maintenance">
-                <p className="text-xs text-muted-foreground mb-4">
-                  Report a new issue or track your existing requests.
-                </p>
-                <div className="space-y-2">
-                  <Link
-                    to="/dashboard/resident/complaints"
-                    className="flex items-center justify-between p-2 rounded-lg hover:bg-foreground/[0.03] transition group"
-                  >
-                    <span className="text-sm">Raise Complaint</span>
-                    <TrendingUp className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
-                  </Link>
-                  <div className="h-px bg-border/50" />
-                  <div className="flex items-center justify-between p-2 text-muted-foreground/50">
-                    <span className="text-sm">Request Service</span>
-                    <span className="text-[10px] uppercase font-bold tracking-wider">Soon</span>
-                  </div>
-                </div>
-              </Card>
-            </div>
           </div>
 
           {/* Sidebar */}
           <div className="space-y-6">
+            
+            {/* Active Visitors inside */}
+            {activeVisitors.length > 0 && (
+              <Card title="Currently Visiting">
+                <div className="space-y-3">
+                  {activeVisitors.map(v => (
+                    <div key={v.id} className="flex items-center justify-between p-2 rounded-lg bg-foreground/[0.03]">
+                      <div>
+                        <div className="text-sm font-medium">{v.name}</div>
+                        <div className="text-[10px] text-muted-foreground">Since {v.checkIn}</div>
+                      </div>
+                      <Badge tone="primary">Inside</Badge>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
             {/* Bills Sidebar */}
             <Card title="Pending Payments">
               <div className="space-y-4">

@@ -175,7 +175,7 @@ export async function adminUnpaidBillsTotal(): Promise<number> {
 }
 
 export async function adminActiveVisitorCount(): Promise<number> {
-  const { count, error } = await supabase.from("visitors").select("*", { count: "exact", head: true }).is("exit_time", null);
+  const { count, error } = await supabase.from("visitors").select("*", { count: "exact", head: true }).eq("status", "checked_in");
   return error ? 0 : count ?? 0;
 }
 
@@ -273,13 +273,28 @@ export async function createBill(args: {
   due_date: string;
   label?: string;
 }): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("bills").insert({
+  const { data: bill, error } = await supabase.from("bills").insert({
     resident_id: args.resident_id,
     amount:  args.amount,
     due_date: args.due_date,
     status:  "pending",
     label:   args.label ?? "Maintenance",
-  });
+  }).select('id').single();
+  
+  if (!error && bill) {
+    const { data: r } = await supabase.from("residents").select("user_id").eq("id", args.resident_id).single();
+    if (r && r.user_id) {
+       await createNotification({
+         user_id: r.user_id,
+         title: 'New Bill Generated',
+         message: `A new bill for ${args.label || 'Maintenance'} (₹${args.amount}) has been generated.`,
+         type: 'bill_created',
+         related_module: 'billing',
+         related_record_id: bill.id,
+         created_by: 'Admin',
+       });
+    }
+  }
   return error ? { error: error.message } : { error: null };
 }
 
@@ -337,14 +352,29 @@ export async function createBillsBulk(args: {
   }));
 
   // 4. Insert
-  const { error: insertErr } = await supabase.from("bills").insert(rows);
+  const { error: insErr } = await supabase.from("bills").insert(rows);
 
-  if (insertErr) {
-    console.error("[billing] insert error:", insertErr.message, insertErr.details);
-    return { count: 0, error: insertErr.message };
+  if (!insErr) {
+     const residentIds = residents.map(r => r.id);
+     const { data: usersData } = await supabase.from('residents').select('id, user_id').in('id', residentIds);
+     
+     if (usersData) {
+       for (const u of usersData) {
+         if (u.user_id) {
+           await createNotification({
+             user_id: u.user_id,
+             title: 'New Bill Generated',
+             message: `A new bill for ${args.label || 'Maintenance'} (₹${args.amount}) has been generated.`,
+             type: 'bill_created',
+             related_module: 'billing',
+             created_by: 'Admin',
+           });
+         }
+       }
+     }
   }
 
-  return { count: rows.length, error: null };
+  return { count: rows.length, error: insErr ? insErr.message : null };
 }
 
 export async function payBill(args: { bill_id: string | number }): Promise<{ error: string | null }> {
@@ -359,6 +389,18 @@ export async function payBill(args: { bill_id: string | number }): Promise<{ err
 
   if (error) return { error: error.message };
   if (!data || data.length === 0) return { error: "Unauthorized or bill not found. Please try again." };
+  
+  // Notify admin that bill is paid
+  const bill = data[0];
+  await createNotification({
+    user_role: 'admin',
+    title: 'Bill Paid',
+    message: `Bill #${bill.id} has been paid.`,
+    type: 'bill_paid',
+    related_module: 'billing',
+    related_record_id: bill.id.toString(),
+    created_by: 'Resident',
+  });
   
   return { error: null };
 }
@@ -534,7 +576,7 @@ export async function createComplaint(args: {
   priority?: string;
   category?: string;
 }): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("complaints").insert({
+  const { data: comp, error } = await supabase.from("complaints").insert({
     resident_id: args.resident_id,
     title: args.title,
     description: args.body,
@@ -542,13 +584,45 @@ export async function createComplaint(args: {
     status: "open",
     category: args.category || "General",
     priority: (args.priority || "medium").toLowerCase(),
-  });
+  }).select('id').single();
+  
+  if (!error && comp) {
+    await createNotification({
+      user_role: 'admin',
+      title: 'New Complaint Raised',
+      message: `A new complaint "${args.title}" has been raised.`,
+      type: 'complaint_created',
+      related_module: 'complaints',
+      related_record_id: comp.id,
+      created_by: 'Resident',
+    });
+  }
+  
   return error ? { error: error.message } : { error: null };
 }
 
 export async function updateComplaintStatus(id: string, status: string): Promise<{ error: string | null }> {
   const dbStatus = status === "pending" ? "open" : status === "in-progress" ? "in_progress" : status;
   const { error } = await supabase.from("complaints").update({ status: dbStatus, updated_at: new Date().toISOString() }).eq("id", id);
+  
+  if (!error) {
+    const { data: c } = await supabase.from("complaints").select("resident_id, title").eq("id", id).single();
+    if (c) {
+      const { data: r } = await supabase.from("residents").select("user_id").eq("id", c.resident_id).single();
+      if (r && r.user_id) {
+         await createNotification({
+           user_id: r.user_id,
+           title: 'Complaint Status Updated',
+           message: `Your complaint "${c.title}" is now ${status}.`,
+           type: 'complaint_updated',
+           related_module: 'complaints',
+           related_record_id: id,
+           created_by: 'Admin',
+         });
+      }
+    }
+  }
+  
   return error ? { error: error.message } : { error: null };
 }
 
@@ -564,7 +638,7 @@ export async function fetchMyProfile(): Promise<(ResidentRow & { flat_number: st
   const { data: resident, error } = await supabase
     .from("residents")
     // Select both name and full_name — full_name is the NOT NULL column
-    .select(`id, name, full_name, email, phone, flat_id, family_count, status, user_id, created_at,
+    .select(`id, name, full_name, email, phone, alt_phone, bio, flat_id, family_count, status, user_id, created_at,
              flats:flat_id ( id, flat_number, floor, sqft, type, owner_name, blocks:block_id (name) )`)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -599,19 +673,44 @@ export async function updateMyProfile(args: {
   name?: string;
   phone?: string;
   family_count?: number | null;
+  alt_phone?: string;
+  bio?: string;
 }): Promise<{ error: string | null }> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  // Use the security-definer RPC so residents can update their own row
-  // (direct update is blocked by RLS for non-admins)
-  const { error } = await supabase.rpc("update_my_resident_profile", {
-    p_name:         args.name          ?? null,
-    p_phone:        args.phone         ?? null,
-    p_family_count: args.family_count  ?? null,
-  });
+  // Update residents table directly
+  const { error: resError } = await supabase
+    .from("residents")
+    .update({
+      name: args.name,
+      full_name: args.name, // Ensure full_name is also updated
+      phone: args.phone,
+      family_count: args.family_count,
+      alt_phone: args.alt_phone,
+      bio: args.bio,
+    })
+    .eq("user_id", user.id);
 
-  return error ? { error: error.message } : { error: null };
+  if (resError) return { error: resError.message };
+
+  // Sync with profiles table
+  if (args.name) {
+    const { error: profError } = await supabase
+      .from("profiles")
+      .update({
+        full_name: args.name,
+        phone: args.phone,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", user.id);
+      
+    if (profError) {
+      console.warn("Failed to sync profile:", profError.message);
+    }
+  }
+
+  return { error: null };
 }
 
 export async function deleteResident(id: string, flatId?: string): Promise<{ error: string | null }> {
@@ -888,10 +987,7 @@ export async function fetchMaintenanceAssets(): Promise<MaintenanceAssetRow[]> {
   return error ? [] : (data as MaintenanceAssetRow[]) ?? [];
 }
 
-export async function checkoutVisitor(id: string): Promise<{ error: string | null }> {
-  const { error } = await supabase.from("visitors").update({ exit_time: new Date().toISOString() }).eq("id", id);
-  return error ? { error: error.message } : { error: null };
-}
+
 
 export async function insertVisitor(args: {
   name: string;
@@ -917,118 +1013,69 @@ export type VisitorDetailed = {
   id: string;
   name: string;
   phone: string;
-  flat_id: string;
-  flat: string;
-  host: string;
-  purpose: "Guest" | "Delivery" | "Service" | "Cab";
+  purpose: string;
+  vehicle?: string;
+  status: string;
+  otp?: string | null;
+  otp_expires_at?: string | null;
   checkIn: string;
   checkOut?: string;
-  vehicle?: string;
   date: string;
-  guard: string;
   entry_time_raw: string;
   exit_time_raw: string | null;
+  visitor_count: number;
+  flat: string;
+  host: string;
+  guard: string;
+  resident_id?: string;
 };
 
 export async function fetchVisitorsDetailed(): Promise<VisitorDetailed[]> {
-  const { data: visitorsData, error: visitorsErr } = await supabase
-    .from("visitors")
-    .select(`
-      id,
-      name,
-      phone,
-      vehicle_number,
-      purpose,
-      entry_time,
-      exit_time,
-      security_id,
-      flat_id,
-      flats:flat_id (
-        id,
-        flat_number,
-        owner_name,
-        blocks:block_id (
-          name
-        ),
-        residents (
-          name
-        )
-      )
-    `)
-    .order("entry_time", { ascending: false });
-
-  if (visitorsErr) {
-    console.error("[visitors] SELECT error:", visitorsErr.message);
-    return [];
-  }
-
-  const { data: profilesData, error: profilesErr } = await supabase
-    .from("profiles")
-    .select("id, full_name");
-
-  const guardMap = new Map<string, string>();
-  if (!profilesErr && profilesData) {
-    profilesData.forEach((p) => {
-      guardMap.set(p.id, p.full_name || "System");
-    });
-  }
-
-  const list = (visitorsData ?? []) as any[];
-
-  return list.map((v) => {
-    const blockName = v.flats?.blocks?.name ?? "";
-    const flatNum = v.flats?.flat_number ?? "";
-    const flatLabel = blockName && flatNum ? `${blockName}-${flatNum}` : "N/A";
+  const { data, error } = await supabase.from('visitors').select('*').order('check_in', { ascending: false });
+  if (error || !data) return [];
+  
+  return data.map((v: any) => {
+    let checkInTime = '';
+    if (v.check_in) {
+      const dt = new Date(v.check_in);
+      checkInTime = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    }
     
-    const residentName = v.flats?.residents?.[0]?.name ?? v.flats?.owner_name ?? "Host";
-    const guardName = v.security_id ? (guardMap.get(v.security_id) ?? "Security Guard") : "Security Guard";
-
-    const checkInTime = v.entry_time
-      ? new Date(v.entry_time).toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-        })
-      : "";
-
-    const checkOutTime = v.exit_time
-      ? new Date(v.exit_time).toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-        })
-      : undefined;
-
-    const entryDate = v.entry_time
-      ? new Date(v.entry_time).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        })
-      : "";
-
+    let checkOutTime: string | undefined;
+    if (v.check_out) {
+      const dt = new Date(v.check_out);
+      checkOutTime = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    }
+    
+    const entryDate = v.check_in
+      ? new Date(v.check_in).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : 'Pending';
+      
     return {
       id: v.id,
       name: v.name,
-      phone: v.phone || "—",
-      flat_id: v.flat_id || "",
-      flat: flatLabel,
-      host: residentName,
-      purpose: v.purpose as any,
+      phone: v.phone || '?',
+      purpose: v.purpose,
+      vehicle: v.vehicle,
+      status: v.status,
+      otp: v.otp,
+      otp_expires_at: v.otp_expires_at,
       checkIn: checkInTime,
       checkOut: checkOutTime,
-      vehicle: v.vehicle_number || undefined,
       date: entryDate,
-      guard: guardName,
-      entry_time_raw: v.entry_time,
-      exit_time_raw: v.exit_time,
+      entry_time_raw: v.check_in,
+      exit_time_raw: v.check_out,
+      visitor_count: v.visitor_count || 1,
+      flat: (v.block_id || '') + '-' + (v.flat_number || ''),
+      host: v.host_name || '?',
+      guard: 'Gate 1',
+      resident_id: v.resident_id,
     };
   });
 }
-
 export async function fetchActiveVisitorsDetailed(): Promise<VisitorDetailed[]> {
   const all = await fetchVisitorsDetailed();
-  return all.filter((v) => !v.exit_time_raw);
+  return all.filter((v) => v.status === 'checked_in');
 }
 
 export type MaintenanceRow = {
@@ -1068,7 +1115,20 @@ export async function insertMaintenanceEntry(args: {
   status: string;
 }): Promise<{ error: string | null }> {
   const payload: any = { ...args };
-  const { error } = await supabase.from("maintenance").insert(payload);
+  const { data: maint, error } = await supabase.from("maintenance").insert(payload).select('id').single();
+  
+  if (!error && maint) {
+    await createNotification({
+      user_role: 'security',
+      title: 'Maintenance Scheduled',
+      message: `Maintenance for ${args.asset_name} scheduled at ${args.location}.`,
+      type: 'maintenance_scheduled',
+      related_module: 'maintenance',
+      related_record_id: maint.id.toString(),
+      created_by: 'Admin',
+    });
+  }
+  
   return error ? { error: error.message } : { error: null };
 }
 
@@ -1098,3 +1158,284 @@ export async function deleteMaintenanceEntry(id: number): Promise<{ error: strin
   return error ? { error: error.message } : { error: null };
 
 }
+export type NotificationRow = {
+  id: string;
+  user_id?: string | null;
+  user_role?: string | null;
+  type: string;
+  title: string;
+  message: string;
+  related_module?: string | null;
+  related_record_id?: string | null;
+  read: boolean;
+  created_at: string;
+  created_by?: string | null;
+};
+
+export async function fetchNotifications(role?: string, userId?: string): Promise<NotificationRow[]> {
+  if (!role && !userId) return [];
+  
+  let query = supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(50);
+  
+  if (role && userId) {
+    query = query.or(`user_id.eq.${userId},user_role.eq.${role.toLowerCase()}`);
+  } else if (userId) {
+    query = query.eq('user_id', userId);
+  } else if (role) {
+    query = query.eq('user_role', role.toLowerCase());
+  }
+
+  const { data, error } = await query;
+  return error ? [] : (data as NotificationRow[]);
+}
+
+export async function markNotificationRead(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function markAllNotificationsRead(role?: string, userId?: string): Promise<{ error: string | null }> {
+  if (!role && !userId) return { error: 'No user identified' };
+  
+  let query = supabase.from('notifications').update({ read: true }).eq('read', false);
+  
+  if (role && userId) {
+    query = query.or(`user_id.eq.${userId},user_role.eq.${role.toLowerCase()}`);
+  } else if (userId) {
+    query = query.eq('user_id', userId);
+  } else if (role) {
+    query = query.eq('user_role', role.toLowerCase());
+  }
+  
+  const { error } = await query;
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function createNotification(args: {
+  user_id?: string | null;
+  user_role?: string | null;
+  type: string;
+  title: string;
+  message: string;
+  related_module?: string;
+  related_record_id?: string;
+  created_by?: string;
+}): Promise<{ error: string | null }> {
+  // Deduplication: prevent duplicate notifications for the same record/type within 10 minutes
+  if (args.related_record_id && args.type) {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    let dupQuery = supabase
+      .from('notifications')
+      .select('id')
+      .eq('type', args.type)
+      .eq('related_record_id', args.related_record_id)
+      .gte('created_at', tenMinutesAgo);
+
+    if (args.user_role) dupQuery = dupQuery.eq('user_role', args.user_role.toLowerCase());
+    if (args.user_id) dupQuery = dupQuery.eq('user_id', args.user_id);
+
+    const { data: existing } = await dupQuery.limit(1);
+    if (existing && existing.length > 0) {
+      // Already sent this notification recently — skip
+      return { error: null };
+    }
+  }
+
+  const payload: any = { ...args };
+  if (payload.user_role) payload.user_role = payload.user_role.toLowerCase();
+  
+  const { error } = await supabase.from('notifications').insert(payload);
+  if (error) {
+    console.error("Notification insert error:", error);
+  }
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function createVisitorRequest(args: {
+  name: string;
+  phone: string;
+  purpose: string;
+  visitor_count: number;
+  vehicle?: string;
+  block_id?: string;
+  resident_id: string;
+  flat_number: string;
+  host_name: string;
+}): Promise<{ error: string | null }> {
+  // Insert visitor as pending
+  const { data: visitor, error } = await supabase.from('visitors').insert({
+    name: args.name,
+    phone: args.phone,
+    purpose: args.purpose,
+    visitor_count: args.visitor_count,
+    vehicle: args.vehicle || null,
+    block_id: args.block_id || null,
+    resident_id: args.resident_id,
+    flat_number: args.flat_number,
+    host_name: args.host_name,
+    status: 'pending',
+  }).select('id').single();
+
+  if (error || !visitor) return { error: error?.message || 'Failed to create request' };
+
+  // Notify resident
+  const { data: resident } = await supabase.from('residents').select('user_id').eq('id', args.resident_id).single();
+  
+  if (resident && resident.user_id) {
+    const { error: notifErr } = await createNotification({
+      user_id: resident.user_id,
+      title: 'New Visitor Request',
+      message: `${args.name} is waiting at the gate for ${args.purpose}.`,
+      type: 'visitor_request',
+      related_module: 'visitors',
+      related_record_id: visitor.id,
+      created_by: 'Security',
+    });
+    if (notifErr) {
+      console.error("Failed to notify resident:", notifErr);
+      return { error: "Visitor added, but failed to send notification: " + notifErr };
+    }
+  }
+
+  return { error: null };
+}
+
+export async function approveVisitorRequest(id: string, residentUserId: string): Promise<{ otp: string | null, error: string | null }> {
+  const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digit OTP
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+
+  const { error } = await supabase.from('visitors').update({
+    status: 'approved',
+    otp: otp,
+    otp_expires_at: expiresAt,
+  }).eq('id', id);
+
+  if (error) return { otp: null, error: error.message };
+
+  await createNotification({
+    user_role: 'security',
+    title: 'Visitor Approved',
+    message: `A visitor request has been approved.`,
+    type: 'visitor_approved',
+    related_module: 'visitors',
+    related_record_id: id,
+    created_by: 'Resident',
+  });
+
+  return { otp, error: null };
+}
+
+export async function rejectVisitorRequest(id: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.from('visitors').update({
+    status: 'rejected',
+  }).eq('id', id);
+
+  if (!error) {
+    await createNotification({
+      user_role: 'security',
+      title: 'Visitor Rejected',
+      message: `A visitor request has been rejected.`,
+      type: 'visitor_rejected',
+      related_module: 'visitors',
+      related_record_id: id,
+      created_by: 'Resident',
+    });
+  }
+
+  return error ? { error: error.message } : { error: null };
+}
+
+export async function verifyVisitorOtpAndCheckIn(id: string, otp: string, parkingSlotId?: string): Promise<{ error: string | null }> {
+  // First, verify OTP
+  const { data, error: fetchErr } = await supabase.from('visitors').select('otp, otp_expires_at, status').eq('id', id).single();
+  if (fetchErr || !data) return { error: fetchErr?.message || 'Visitor not found' };
+
+  if (data.status !== 'approved') return { error: 'Visitor request is not approved' };
+  if (data.otp !== otp) return { error: 'Invalid OTP' };
+  
+  const now = new Date();
+  if (data.otp_expires_at && new Date(data.otp_expires_at) < now) {
+    return { error: 'OTP has expired' };
+  }
+
+  // OTP verified, check in
+  const updateData: any = {
+    status: 'checked_in',
+    check_in: now.toISOString(),
+  };
+
+  if (parkingSlotId) {
+    // Find the actual parking slot ID since they might have typed the slot_number (e.g., "P-001")
+    const { data: slot } = await supabase
+      .from('parking_slots')
+      .select('id')
+      .or(`id.eq.${parkingSlotId},slot_number.eq.${parkingSlotId}`)
+      .maybeSingle();
+      
+    if (!slot) {
+      return { error: `Parking slot '${parkingSlotId}' not found.` };
+    }
+    
+    updateData.parking_slot_id = slot.id;
+    // Update parking slot status
+    await supabase.from('parking_slots').update({ status: 'occupied' }).eq('id', slot.id);
+  }
+
+  const { error: updateErr } = await supabase.from('visitors').update(updateData).eq('id', id);
+  
+  if (!updateErr) {
+    const { data: v } = await supabase.from('visitors').select('resident_id, name').eq('id', id).single();
+    if (v) {
+      const { data: r } = await supabase.from('residents').select('user_id').eq('id', v.resident_id).single();
+      if (r && r.user_id) {
+        await createNotification({
+          user_id: r.user_id,
+          title: 'Visitor Checked In',
+          message: `${v.name} has checked in.`,
+          type: 'visitor_checked_in',
+          related_module: 'visitors',
+          related_record_id: id,
+          created_by: 'Security',
+        });
+      }
+    }
+  }
+
+  return updateErr ? { error: updateErr.message } : { error: null };
+}
+
+export async function checkoutVisitor(id: string): Promise<{ error: string | null }> {
+  // Get visitor to see if they had a parking slot
+  const { data } = await supabase.from('visitors').select('parking_slot_id').eq('id', id).single();
+
+  const { error } = await supabase.from('visitors').update({ 
+    status: 'checked_out', 
+    check_out: new Date().toISOString() 
+  }).eq('id', id);
+
+  if (!error) {
+    if (data?.parking_slot_id) {
+      // Release parking slot
+      await supabase.from('parking_slots').update({ status: 'free' }).eq('id', data.parking_slot_id);
+    }
+    
+    const { data: v } = await supabase.from('visitors').select('resident_id, name').eq('id', id).single();
+    if (v) {
+      const { data: r } = await supabase.from('residents').select('user_id').eq('id', v.resident_id).single();
+      if (r && r.user_id) {
+        await createNotification({
+          user_id: r.user_id,
+          title: 'Visitor Checked Out',
+          message: `${v.name} has checked out.`,
+          type: 'visitor_checked_out',
+          related_module: 'visitors',
+          related_record_id: id,
+          created_by: 'Security',
+        });
+      }
+    }
+  }
+
+  return error ? { error: error.message } : { error: null };
+}
+

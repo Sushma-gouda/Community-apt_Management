@@ -5,6 +5,7 @@ import { Card, DashboardLayout } from "@/components/dashboard/DashboardLayout";
 import { residentNav } from "@/components/dashboard/residentNav";
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { fetchMyProfile, updateMyProfile } from "@/services/supabase/community";
+import { useAuth } from "@/context/AuthContext";
 
 export const Route = createFileRoute("/dashboard/resident/profile")({
   head: () => ({ meta: [{ title: "My Profile — Communa" }] }),
@@ -27,6 +28,7 @@ type Profile = {
 };
 
 function ResidentProfile() {
+  const { refreshProfile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -38,20 +40,19 @@ function ResidentProfile() {
       const p = await fetchMyProfile();
       if (p) {
         const mapped: Profile = {
-          // `p.name` is the actual DB column from `residents.name`
           name: p.name ?? "",
           email: p.email ?? "",
           phone: p.phone || "",
-          altPhone: "",
-          flat: p.flat_number,
+          altPhone: p.alt_phone || "",
+          flat: `${p.block_name}-${p.flat_number}`,
           block: p.block_name,
           floor: String(p.floor),
           sqft: String(p.sqft),
-          familyCount: String(p.family_count || 1),
+          familyCount: p.family_count?.toString() || "1",
           since: p.created_at
             ? new Date(p.created_at).toLocaleDateString("en-US", { month: "long", year: "numeric" })
             : "—",
-          bio: "",
+          bio: p.bio || "",
           id_suffix: p.id ? String(p.id).slice(-4).toUpperCase() : "0000",
         };
         setProfile(mapped);
@@ -77,12 +78,15 @@ function ResidentProfile() {
         name: draft.name,
         phone: draft.phone,
         family_count: parseInt(draft.familyCount) || 1,
+        alt_phone: draft.altPhone,
+        bio: draft.bio,
       });
       if (error) {
         alert("Error saving: " + error);
       } else {
         setProfile(draft);
         setEditing(false);
+        refreshProfile(); // Update AuthContext and Layout with new name
       }
     } finally {
       setLoading(false);
