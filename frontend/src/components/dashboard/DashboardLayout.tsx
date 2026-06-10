@@ -119,10 +119,10 @@ export function DashboardLayout({
                   key={it.to + it.label}
                   to={it.to}
                   className={cn(
-                    "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all",
+                    "flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm transition-all duration-200",
                     active
-                      ? "bg-[image:var(--gradient-primary)] text-white shadow-elegant"
-                      : "text-foreground/75 hover:text-foreground hover:bg-foreground/5",
+                      ? "bg-primary/10 text-primary font-semibold shadow-sm"
+                      : "text-foreground/75 font-medium hover:text-foreground hover:bg-foreground/5",
                   )}
                 >
                   <it.icon className="h-4 w-4 shrink-0" />
@@ -133,9 +133,9 @@ export function DashboardLayout({
           </nav>
 
           {/* User footer */}
-          <div className="p-3 border-t border-border shrink-0">
-            <div className="flex items-center gap-3 p-2 rounded-xl">
-              <div className="h-9 w-9 rounded-full bg-[image:var(--gradient-primary)] grid place-items-center text-white text-sm font-semibold shrink-0">
+          <div className="p-3 border-t border-border/50 shrink-0">
+            <div className="flex items-center gap-3 p-2 rounded-xl transition hover:bg-foreground/[0.02]">
+              <div className="h-9 w-9 rounded-full bg-primary/10 grid place-items-center text-primary text-sm font-bold shrink-0">
                 {initials}
               </div>
               <div className="flex-1 min-w-0">
@@ -166,8 +166,8 @@ export function DashboardLayout({
       {/* Main content area */}
       <div className="flex-1 min-w-0 lg:ml-[calc(18rem+2rem)] flex flex-col min-h-screen">
         {/* Top navbar */}
-        <header className="sticky top-0 z-20 px-3 lg:px-4 pt-3 lg:pt-4 shrink-0">
-          <div className="rounded-2xl glass-strong shadow-card px-4 sm:px-5 py-3 flex items-center gap-3">
+        <header className="sticky top-0 z-20 px-4 sm:px-6 lg:px-8 pt-4 lg:pt-6 shrink-0 transition-all">
+          <div className="rounded-2xl glass-strong border border-border/40 shadow-sm px-4 sm:px-6 py-3.5 flex items-center gap-4">
             <button
               onClick={() => setOpen(true)}
               className="lg:hidden p-2 rounded-md hover:bg-foreground/5"
@@ -358,9 +358,9 @@ export function DashboardLayout({
                     setProfileOpen((v) => !v);
                     setNotificationsOpen(false);
                   }}
-                  className="hidden sm:flex items-center gap-2 h-9 pl-1.5 pr-3 rounded-lg hover:bg-foreground/5"
+                  className="hidden sm:flex items-center gap-2.5 h-9 pl-2 pr-3 rounded-xl hover:bg-foreground/5 transition"
                 >
-                  <div className="h-6 w-6 rounded-full bg-[image:var(--gradient-primary)] grid place-items-center text-white text-[11px] font-semibold">
+                  <div className="h-6 w-6 rounded-full bg-primary/10 grid place-items-center text-primary text-[11px] font-bold">
                     {initials}
                   </div>
                   <span className="text-sm">{role}</span>
@@ -394,7 +394,7 @@ export function DashboardLayout({
         </header>
 
         {/* Page content */}
-        <main className="flex-1 px-3 lg:px-4 py-5 lg:py-6">{children}</main>
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">{children}</main>
       </div>
     </div>
   );
@@ -420,11 +420,11 @@ export function StatCard({
     accent: "bg-accent/15 text-accent",
   };
   return (
-    <div className="rounded-2xl glass shadow-card p-5 hover:shadow-elegant transition">
+    <div className="rounded-2xl glass border border-border/40 shadow-sm p-6 hover:shadow-md transition-shadow duration-300">
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-xs text-muted-foreground">{label}</div>
-          <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
+          <div className="text-sm font-medium text-muted-foreground">{label}</div>
+          <div className="mt-2.5 text-3xl font-bold tracking-tight">{value}</div>
           {change && (
             <div className="mt-1 text-xs text-[color:var(--success)] font-medium">{change}</div>
           )}
@@ -447,9 +447,9 @@ export function Card({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl glass shadow-card p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold">{title}</h3>
+    <div className="rounded-2xl bg-card border border-border/40 shadow-sm p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-base font-semibold">{title}</h3>
         {action}
       </div>
       {children}

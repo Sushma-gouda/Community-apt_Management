@@ -1439,3 +1439,92 @@ export async function checkoutVisitor(id: string): Promise<{ error: string | nul
   return error ? { error: error.message } : { error: null };
 }
 
+
+// --- Admin Dashboard Aggregation Functions ---
+
+export async function fetchMaintenanceCollectionsChart(): Promise<number[]> {
+  const currentYear = new Date().getFullYear();
+  const startOfYear = new Date(currentYear, 0, 1).toISOString();
+  
+  const { data, error } = await supabase
+    .from('bills')
+    .select('amount, created_at')
+    .eq('status', 'paid')
+    .gte('created_at', startOfYear);
+    
+  if (error || !data) return Array(12).fill(0);
+  
+  const monthlyTotals = Array(12).fill(0);
+  data.forEach(bill => {
+    const d = new Date(bill.created_at);
+    if (d.getFullYear() === currentYear) {
+      monthlyTotals[d.getMonth()] += Number(bill.amount) || 0;
+    }
+  });
+  
+  // Return the totals array directly
+  return monthlyTotals;
+}
+
+export async function fetchQuickStats(): Promise<{
+  billsPaidPercent: number;
+  complaintSlaPercent: number;
+  visitorApprovalsPercent: number;
+  maintenanceCompletedPercent: number;
+}> {
+  let billsPaidPercent = 0, complaintSlaPercent = 0, visitorApprovalsPercent = 0, maintenanceCompletedPercent = 0;
+  
+  const [bills, complaints, visitors, maintenance] = await Promise.all([
+    supabase.from('bills').select('status', { count: 'exact' }),
+    supabase.from('complaints').select('status', { count: 'exact' }),
+    supabase.from('visitors').select('status', { count: 'exact' }),
+    supabase.from('maintenance_tasks').select('status', { count: 'exact' }),
+  ]);
+
+  if (bills.data && bills.data.length > 0) {
+    const paid = bills.data.filter(b => b.status === 'paid').length;
+    billsPaidPercent = Math.round((paid / bills.data.length) * 100);
+  }
+
+  if (complaints.data && complaints.data.length > 0) {
+    const resolved = complaints.data.filter(c => c.status === 'resolved').length;
+    complaintSlaPercent = Math.round((resolved / complaints.data.length) * 100);
+  }
+
+  if (visitors.data && visitors.data.length > 0) {
+    const approved = visitors.data.filter(v => v.status === 'approved' || v.status === 'checked-in' || v.status === 'checked-out').length;
+    visitorApprovalsPercent = Math.round((approved / visitors.data.length) * 100);
+  }
+
+  if (maintenance.data && maintenance.data.length > 0) {
+    const completed = maintenance.data.filter(m => m.status === 'completed').length;
+    maintenanceCompletedPercent = Math.round((completed / maintenance.data.length) * 100);
+  }
+
+  return {
+    billsPaidPercent,
+    complaintSlaPercent,
+    visitorApprovalsPercent,
+    maintenanceCompletedPercent
+  };
+}
+
+export async function fetchActivityTimeline(limit = 10): Promise<NotificationRow[]> {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+    
+  if (error || !data) return [];
+  return data as NotificationRow[];
+}
+
+export async function fetchPublicLandingStats() {
+  const { data, error } = await supabase.rpc("get_public_landing_stats");
+  if (error) {
+    console.error("fetchPublicLandingStats error:", error);
+    return null;
+  }
+  return data;
+}

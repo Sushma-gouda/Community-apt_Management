@@ -42,8 +42,8 @@ export function Navbar() {
               <Building2 className="h-5 w-5 text-white" />
             </div>
             <div className="leading-tight">
-              <div className="text-sm font-semibold text-white">Communa</div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-white/60">
+              <div className={cn("text-sm font-semibold", scrolled ? "text-foreground" : "text-white")}>Communa</div>
+              <div className={cn("text-[10px] uppercase tracking-[0.2em]", scrolled ? "text-muted-foreground" : "text-white/60")}>
                 Apartment OS
               </div>
             </div>
@@ -54,7 +54,7 @@ export function Navbar() {
               <a
                 key={l.href}
                 href={l.href}
-                className="px-4 py-2 text-sm text-white/80 hover:text-white rounded-lg hover:bg-white/5 transition"
+                className={cn("px-4 py-2 text-sm rounded-lg transition", scrolled ? "text-foreground/80 hover:text-foreground hover:bg-foreground/5" : "text-white/80 hover:text-white hover:bg-white/5")}
               >
                 {l.label}
               </a>
@@ -65,13 +65,13 @@ export function Navbar() {
             <button
               onClick={toggle}
               aria-label="Toggle theme"
-              className="hidden sm:grid place-items-center h-9 w-9 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition"
+              className={cn("hidden sm:grid place-items-center h-9 w-9 rounded-lg transition", scrolled ? "text-foreground/80 hover:text-foreground hover:bg-foreground/10" : "text-white/80 hover:text-white hover:bg-white/10")}
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
             <Link
               to="/signin"
-              className="hidden sm:inline-flex h-9 items-center px-4 text-sm text-white/90 hover:text-white"
+              className={cn("hidden sm:inline-flex h-9 items-center px-4 text-sm", scrolled ? "text-foreground/90 hover:text-foreground" : "text-white/90 hover:text-white")}
             >
               Sign In
             </Link>
@@ -83,7 +83,7 @@ export function Navbar() {
             </Link>
             <button
               onClick={() => setOpen((v) => !v)}
-              className="md:hidden grid place-items-center h-9 w-9 rounded-lg text-white hover:bg-white/10"
+              className={cn("md:hidden grid place-items-center h-9 w-9 rounded-lg", scrolled ? "text-foreground hover:bg-foreground/10" : "text-white hover:bg-white/10")}
             >
               {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>

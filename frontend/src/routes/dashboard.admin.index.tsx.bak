@@ -12,10 +12,6 @@ import {
   fetchRecentBills,
   fetchFlatsWithBlocks,
   fetchVisitorsAll,
-  fetchMaintenanceCollectionsChart,
-  fetchQuickStats,
-  fetchActivityTimeline,
-  type NotificationRow,
   type ComplaintRow,
   type BillRow,
   type VisitorDetailed,
@@ -28,7 +24,6 @@ import {
   Car,
   Building2,
   TrendingUp,
-  Bell,
 } from "lucide-react";
 import { Badge, Card, DashboardLayout, StatCard } from "@/components/dashboard/DashboardLayout";
 import { adminNav } from "@/components/dashboard/adminNav";
@@ -59,14 +54,6 @@ function AdminDashboard() {
   const [payments, setPayments] = useState<BillRow[]>([]);
   const [blocksData, setBlocksData] = useState<{ b: string; occ: number; units: string }[]>([]);
   const [visitorsStats, setVisitorsStats] = useState({ guests: 0, delivery: 0, cab: 0, service: 0 });
-  const [collectionsChart, setCollectionsChart] = useState<number[]>([0,0,0,0,0,0,0,0,0,0,0,0]);
-  const [quickStats, setQuickStats] = useState({
-    billsPaidPercent: 0,
-    complaintSlaPercent: 0,
-    visitorApprovalsPercent: 0,
-    maintenanceCompletedPercent: 0,
-  });
-  const [activityTimeline, setActivityTimeline] = useState<NotificationRow[]>([]);
 
   const rawDisplayName = profile?.full_name?.trim() || user?.user_metadata?.full_name?.trim() || "Admin";
   const displayName = formatDisplayName(rawDisplayName, "Admin");
@@ -80,10 +67,7 @@ function AdminDashboard() {
       adminActiveVisitorCount(),
       adminParkingStats(),
       fetchVisitorsAll(),
-      fetchMaintenanceCollectionsChart(),
-      fetchQuickStats(),
-      fetchActivityTimeline(5)
-    ]).then(([res, flats, comp, bills, vis, parking, allVisitors, chartData, qStats, timeline]) => {
+    ]).then(([res, flats, comp, bills, vis, parking, allVisitors]) => {
       setStats({
         residents: res,
         flatsOccupied: flats.occupied,
@@ -94,10 +78,6 @@ function AdminDashboard() {
         parkingOccupied: parking.occupied,
         parkingTotal: parking.total,
       });
-
-      setCollectionsChart(chartData);
-      setQuickStats(qStats);
-      setActivityTimeline(timeline);
 
       const today = new Date().toDateString();
       const todaysVisitors = allVisitors.filter(v => v.entry_time_raw && new Date(v.entry_time_raw).toDateString() === today);
@@ -205,9 +185,9 @@ function AdminDashboard() {
 
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <Card title="Maintenance Collections">
+            <Card title="Maintenance Collections" action={<Badge tone="success">+12.4%</Badge>}>
               <LineChart
-                points={collectionsChart}
+                points={[40, 55, 38, 72, 60, 80, 68, 90, 75, 85, 95, 88]}
                 labels={["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]}
               />
             </Card>
@@ -278,19 +258,8 @@ function AdminDashboard() {
             </Card>
           </div>
           <Card title="Activity Timeline">
-            <div className="space-y-4 pt-1">
-              {activityTimeline.length === 0 ? (
-                <div className="text-sm text-muted-foreground p-2">No recent activity.</div>
-              ) : (
-                activityTimeline.map((activity) => (
-                  <div key={activity.id} className="relative pl-6">
-                    <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-primary shadow-[0_0_8px_2px] shadow-primary/20" />
-                    <span className="absolute left-[3px] top-4 bottom-[-16px] w-[2px] bg-border last:hidden" />
-                    <p className="text-sm font-medium text-foreground leading-snug">{activity.title}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{new Date(activity.created_at).toLocaleString()}</p>
-                  </div>
-                ))
-              )}
+            <div className="text-sm text-muted-foreground p-2">
+              Activity timeline will go here...
             </div>
           </Card>
         </div>
@@ -352,10 +321,10 @@ function AdminDashboard() {
           <Card title="Quick Stats">
             <div className="space-y-4">
               {[
-                { label: "Bills paid", value: `${quickStats.billsPaidPercent}%`, color: "var(--success)" },
-                { label: "Complaint SLA", value: `${quickStats.complaintSlaPercent}%`, color: "var(--warning)" },
-                { label: "Visitor approvals", value: `${quickStats.visitorApprovalsPercent}%`, color: "var(--primary)" },
-                { label: "Maintenance completed", value: `${quickStats.maintenanceCompletedPercent}%`, color: "var(--accent)" },
+                { label: "Bills paid", value: "82%", color: "var(--success)" },
+                { label: "Complaint SLA", value: "76%", color: "var(--warning)" },
+                { label: "Visitor approvals", value: "98%", color: "var(--primary)" },
+                { label: "Active staff", value: "100%", color: "var(--accent)" },
               ].map((s) => (
                 <div key={s.label}>
                   <div className="flex items-center justify-between text-xs mb-1.5">

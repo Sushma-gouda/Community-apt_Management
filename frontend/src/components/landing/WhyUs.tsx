@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Award, Lock, Rocket, Smile } from "lucide-react";
+import { fetchPublicLandingStats } from "@/services/supabase/community";
 
 const reasons = [
   {
@@ -24,6 +26,32 @@ const reasons = [
 ];
 
 export function WhyUs() {
+  const [stats, setStats] = useState([
+    { k: "-", v: "Residents" },
+    { k: "-", v: "Total Flats" },
+    { k: "-", v: "Processed" },
+    { k: "-", v: "Blocks" },
+  ]);
+
+  useEffect(() => {
+    async function loadStats() {
+      try {
+        const data: any = await fetchPublicLandingStats();
+        if (data) {
+          setStats([
+            { k: data.residents.toString(), v: "Residents" },
+            { k: data.flats.toString(), v: "Total Flats" },
+            { k: `₹${Number(data.processed_bills).toLocaleString("en-IN")}`, v: "Processed" },
+            { k: data.blocks.toString(), v: "Blocks" },
+          ]);
+        }
+      } catch (e) {
+        console.error("Failed to load dynamic stats", e);
+      }
+    }
+    loadStats();
+  }, []);
+
   return (
     <section id="why" className="py-28 px-4 sm:px-6">
       <div className="mx-auto max-w-7xl">
@@ -60,12 +88,7 @@ export function WhyUs() {
 
         {/* Stats */}
         <div className="mt-20 grid grid-cols-2 md:grid-cols-4 gap-4 rounded-3xl glass-strong shadow-card p-8">
-          {[
-            { k: "10,000+", v: "Residents" },
-            { k: "120+", v: "Communities" },
-            { k: "₹50Cr+", v: "Processed" },
-            { k: "4.9★", v: "App rating" },
-          ].map((s) => (
+          {stats.map((s) => (
             <div key={s.v} className="text-center">
               <div className="text-3xl sm:text-4xl font-semibold text-gradient">{s.k}</div>
               <div className="mt-1 text-xs uppercase tracking-widest text-muted-foreground">

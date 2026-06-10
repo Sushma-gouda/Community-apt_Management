@@ -100,8 +100,8 @@
 }
 
 :root {
-  --radius: 0.875rem;
-  --background: oklch(0.985 0.005 240);
+  --radius: 1rem;
+  --background: oklch(0.975 0.005 240);
   --foreground: oklch(0.18 0.03 250);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.18 0.03 250);
@@ -137,13 +137,13 @@
     radial-gradient(at 50% 80%, oklch(0.7 0.17 195 / 0.2), transparent 50%);
   --shadow-elegant: 0 20px 60px -20px oklch(0.55 0.19 265 / 0.35);
   --shadow-glow: 0 0 50px -10px oklch(0.72 0.18 295 / 0.5);
-  --shadow-card: 0 1px 3px oklch(0 0 0 / 0.04), 0 10px 40px -10px oklch(0.2 0.04 260 / 0.1);
+  --shadow-card: 0 1px 3px oklch(0 0 0 / 0.03), 0 20px 40px -15px oklch(0.2 0.04 260 / 0.08);
 }
 
 .dark {
-  --background: oklch(0.14 0.025 260);
+  --background: oklch(0.12 0.02 260);
   --foreground: oklch(0.97 0.005 240);
-  --card: oklch(0.19 0.03 260);
+  --card: oklch(0.16 0.025 260);
   --card-foreground: oklch(0.97 0.005 240);
   --popover: oklch(0.19 0.03 260);
   --popover-foreground: oklch(0.97 0.005 240);
@@ -173,7 +173,7 @@
   );
   --shadow-elegant: 0 20px 60px -20px oklch(0.65 0.2 275 / 0.5);
   --shadow-glow: 0 0 60px -5px oklch(0.78 0.17 305 / 0.55);
-  --shadow-card: 0 1px 3px oklch(0 0 0 / 0.3), 0 20px 50px -15px oklch(0 0 0 / 0.5);
+  --shadow-card: 0 1px 3px oklch(0 0 0 / 0.4), 0 20px 50px -15px oklch(0 0 0 / 0.6);
 }
 
 @layer base {
@@ -196,6 +196,19 @@
   h4 {
     font-family: var(--font-display);
     letter-spacing: -0.02em;
+  }
+
+  /* Global UI/UX Augmentation */
+  table { @apply w-full text-sm text-left; }
+  thead { @apply bg-foreground/[0.02] text-xs font-semibold uppercase tracking-wider text-muted-foreground; }
+  th { @apply px-4 py-3 border-b border-border/50 font-medium; }
+  tbody tr { @apply border-b border-border/40 transition-colors hover:bg-foreground/[0.02] last:border-0; }
+  td { @apply px-4 py-3 align-middle; }
+  
+  button { @apply transition-all duration-200 active:scale-[0.98]; }
+  
+  input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="date"], input[type="datetime-local"], select, textarea {
+    @apply transition-all focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50;
   }
 }
 

@@ -7,6 +7,7 @@ import {
   Wrench,
   Megaphone,
 } from "lucide-react";
+import { useState } from "react";
 
 const features = [
   {
@@ -47,6 +48,8 @@ const features = [
 ];
 
 export function Features() {
+  const [activeFeature, setActiveFeature] = useState<number | null>(null);
+
   return (
     <section id="features" className="relative py-28 px-4 sm:px-6">
       <div className="absolute inset-0 -z-10 gradient-mesh opacity-40" />
@@ -68,11 +71,12 @@ export function Features() {
           {features.map((f, i) => (
             <div
               key={f.title}
-              className="group relative rounded-2xl glass shadow-card p-6 hover:-translate-y-1 transition-all duration-500 overflow-hidden"
+              onClick={() => setActiveFeature(activeFeature === i ? null : i)}
+              className="cursor-pointer group relative rounded-2xl glass shadow-card p-6 hover:-translate-y-1 transition-all duration-500 overflow-hidden"
               style={{ animationDelay: `${i * 60}ms` }}
             >
               <div
-                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 -z-10"
+                className="absolute inset-0 opacity-0 group-hover:opacity-15 transition-opacity duration-500 -z-10"
                 style={{
                   background: "var(--gradient-primary)",
                   filter: "blur(40px)",
@@ -83,9 +87,11 @@ export function Features() {
                 <f.icon className="h-5 w-5" />
               </div>
               <h3 className="mt-5 text-lg font-semibold">{f.title}</h3>
-              <p className="mt-2 text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
+              {activeFeature === i && (
+                <p className="mt-2 text-sm text-muted-foreground leading-relaxed animate-fade-in">{f.desc}</p>
+              )}
               <div className="mt-5 inline-flex items-center text-sm font-medium text-primary opacity-0 group-hover:opacity-100 transition">
-                Learn more →
+                {activeFeature === i ? "Show less" : "Learn more →"}
               </div>
             </div>
           ))}

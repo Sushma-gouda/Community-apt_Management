@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Bell, Bot, CalendarClock, Receipt } from "lucide-react";
+import { fetchPublicLandingStats } from "@/services/supabase/community";
 
 const items = [
   {
@@ -24,6 +26,32 @@ const items = [
 ];
 
 export function Automation() {
+  const [collected, setCollected] = useState("18,42,500");
+  const [stats, setStats] = useState([
+    { label: "Open issues", value: "12", tone: "warning" },
+    { label: "Visitors today", value: "47", tone: "primary" },
+    { label: "Notices sent", value: "8", tone: "accent" },
+  ]);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const data: any = await fetchPublicLandingStats();
+        if (data) {
+          setCollected(Number(data.processed_bills).toLocaleString("en-IN"));
+          setStats([
+            { label: "Open issues", value: data.complaints_open.toString(), tone: "warning" },
+            { label: "Visitors today", value: data.visitors_today.toString(), tone: "primary" },
+            { label: "Notices sent", value: data.notices.toString(), tone: "accent" },
+          ]);
+        }
+      } catch (e) {
+        console.error("Failed to load automation stats", e);
+      }
+    }
+    loadData();
+  }, []);
+
   return (
     <section id="automation" className="relative py-28 px-4 sm:px-6 overflow-hidden">
       <div className="absolute inset-0 -z-10 gradient-mesh opacity-30" />
@@ -67,7 +95,7 @@ export function Automation() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs text-muted-foreground">Maintenance Collected</div>
-                <div className="mt-1 text-3xl font-semibold tracking-tight">₹ 18,42,500</div>
+                <div className="mt-1 text-3xl font-semibold tracking-tight">₹ {collected}</div>
               </div>
               <div className="rounded-lg bg-success/15 text-[color:var(--success)] text-xs font-medium px-2.5 py-1">
                 +12.4%
@@ -85,11 +113,7 @@ export function Automation() {
             </div>
 
             <div className="mt-6 grid grid-cols-3 gap-3">
-              {[
-                { label: "Open issues", value: "12", tone: "warning" },
-                { label: "Visitors today", value: "47", tone: "primary" },
-                { label: "Notices sent", value: "8", tone: "accent" },
-              ].map((s) => (
+              {stats.map((s) => (
                 <div key={s.label} className="rounded-xl bg-foreground/5 p-3">
                   <div className="text-xs text-muted-foreground">{s.label}</div>
                   <div className="mt-1 text-xl font-semibold">{s.value}</div>
